@@ -37,9 +37,9 @@ func (d *runRoleCheckDataSource) Schema(_ context.Context, _ datasource.SchemaRe
 		MarkdownDescription: "Assumes one workspace's run role and reports whether it answered. This is a " +
 			"data source rather than an action because it returns values a configuration reads: an action's " +
 			"`Invoke` hands back only diagnostics and progress messages, so `connected`, `account_id` and " +
-			"`error` could not reach state through one. The read is pure: it calls the API's read-only " +
+			"`error` could not reach state through one. It calls the API's read-only " +
 			"route, which performs the AssumeRole and returns the outcome without recording it on the " +
-			"workspace, so repeated plans and refreshes change nothing. A role that cannot be assumed is " +
+			"workspace, so plans and refreshes do not change the workspace. A role that cannot be assumed is " +
 			"reported as `connected = false` with the reason in `error` rather than failing the plan. Use " +
 			"the `webbpulse_run_role_check` action instead when a failure should stop an apply.",
 		Attributes: map[string]schema.Attribute{

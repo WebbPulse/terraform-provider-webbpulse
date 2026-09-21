@@ -119,14 +119,20 @@ own:
 - The `webbpulse_run_role_check` **data source** is the one to reach for when a
   configuration needs the outcome as values. An action's `Invoke` hands back
   only diagnostics and progress messages, so `connected`, `account_id` and
-  `error` cannot reach state through an action at all. It reads the `GET`, so
-  the read is pure: the same workspace gives the same answer and no plan or
-  refresh mutates anything.
+  `error` cannot reach state through an action at all. It uses `GET`, which
+  probes the current role without changing the workspace. Results can change
+  when the role or its trust policy changes.
 - The `webbpulse_run_role_check` **action** is the one to reach for when a role
   that does not answer should stop an apply. It reports the outcome as a
   progress message and raises an error, or a warning when
-  `fail_if_not_connected` is false. An action runs only during an apply, so it
-  reads the `POST` and leaves the recorded outcome the UI shows.
+  `fail_if_not_connected` is false. Invoking the action uses `POST` and records
+  the outcome the UI shows.
+
+The data source requires both the backend GET handler (WebbPulse-Terraform
+PR63) and its API Gateway route (PR70). It never falls back to POST if GET is
+unavailable. GET needs `workspaces:read`; the action needs `workspaces:write`.
+The GET still performs an STS probe server side; only the workspace write is
+removed. Actions require Terraform 1.14 or later.
 
 A configured role that does not answer is a 200 with `connected` false, not an
 error: the trust policy may simply not be in place yet. The data source reports
