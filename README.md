@@ -98,24 +98,33 @@ terraform import webbpulse_variable.example ws-01JABCDEF0123456789ABCDEF/region
 
 ## The run role check
 
-The control plane exposes the check as `POST /workspaces/{id}/run-role/check`,
-which is a non CRUD operation that returns values. It is shipped in both shapes
-the Plugin Framework offers, because neither covers the whole need on its own:
+The control plane exposes the check on `/workspaces/{id}/run-role/check` in two
+methods, and this provider uses both:
+
+- `GET` performs the AssumeRole and returns the outcome, writing nothing.
+- `POST` performs the same probe and additionally records the outcome on the
+  workspace row, which is what the web UI reads between visits.
+
+The check is a non CRUD operation that returns values, so it is shipped in both
+shapes the Plugin Framework offers, because neither covers the whole need on its
+own:
 
 - The `webbpulse_run_role_check` **data source** is the one to reach for when a
   configuration needs the outcome as values. An action's `Invoke` hands back
   only diagnostics and progress messages, so `connected`, `account_id` and
-  `error` cannot reach state through an action at all. The cost is that a data
-  source read is not a pure read here: it calls the API and the control plane
-  stamps the outcome on the workspace row, and it runs on every plan and
-  refresh.
+  `error` cannot reach state through an action at all. It reads the `GET`, so
+  the read is pure: the same workspace gives the same answer and no plan or
+  refresh mutates anything.
 - The `webbpulse_run_role_check` **action** is the one to reach for when a role
   that does not answer should stop an apply. It reports the outcome as a
   progress message and raises an error, or a warning when
-  `fail_if_not_connected` is false.
+  `fail_if_not_connected` is false. An action runs only during an apply, so it
+  reads the `POST` and leaves the recorded outcome the UI shows.
 
 A configured role that does not answer is a 200 with `connected` false, not an
-error: the trust policy may simply not be in place yet. A workspace with no
+error: the trust policy may simply not be in place yet. The data source reports
+it as `connected = false` with the reason in `error`, so the problem is visible
+in plan output instead of arriving as a provider error. A workspace with no
 role at all is a 400 carrying `RUN_ROLE_MISSING`, which both shapes surface as
 an error naming `run_role_arn`.
 

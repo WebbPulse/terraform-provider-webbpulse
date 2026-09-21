@@ -236,6 +236,102 @@ func TestCheckRunRoleDecodesAnUnconnectedOutcome(t *testing.T) {
 	}
 }
 
+func TestReadRunRoleCheckUsesTheReadOnlyRoute(t *testing.T) {
+	t.Parallel()
+
+	var methods []string
+	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		methods = append(methods, r.Method)
+		if r.URL.Path != "/api/v1/workspaces/ws-01J/run-role/check" {
+			t.Errorf("path = %q, want the run role check route", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"connected":  true,
+			"account_id": "870550636948",
+			"error":      nil,
+		})
+	}))
+
+	for range 2 {
+		got, err := c.ReadRunRoleCheck(context.Background(), "ws-01J")
+		if err != nil {
+			t.Fatalf("ReadRunRoleCheck returned %v", err)
+		}
+		if !got.Connected {
+			t.Error("connected = false, want true")
+		}
+		if got.AccountID == nil || *got.AccountID != "870550636948" {
+			t.Errorf("account id = %v, want the account", got.AccountID)
+		}
+		if got.Error != nil {
+			t.Errorf("error = %v, want nil", *got.Error)
+		}
+	}
+
+	for _, method := range methods {
+		if method != http.MethodGet {
+			t.Errorf("method = %q, want GET so the read writes nothing", method)
+		}
+	}
+	if len(methods) != 2 {
+		t.Errorf("requests = %d, want 2", len(methods))
+	}
+}
+
+func TestReadRunRoleCheckDecodesAnUnconnectedOutcome(t *testing.T) {
+	t.Parallel()
+
+	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %q, want GET", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"connected":  false,
+			"account_id": nil,
+			"error":      "The role does not trust the runner or the external id does not match",
+		})
+	}))
+
+	got, err := c.ReadRunRoleCheck(context.Background(), "ws-01J")
+	if err != nil {
+		t.Fatalf("ReadRunRoleCheck returned %v", err)
+	}
+	if got.Connected {
+		t.Error("connected = true, want false")
+	}
+	if got.AccountID != nil {
+		t.Errorf("account id = %v, want nil", got.AccountID)
+	}
+	if got.Error == nil {
+		t.Fatal("error = nil, want the reason")
+	}
+}
+
+func TestReadRunRoleCheckDecodesAMissingRunRole(t *testing.T) {
+	t.Parallel()
+
+	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"detail": map[string]any{
+				"message":    "This workspace has no run role ARN yet.",
+				"error_code": RunRoleMissingCode,
+			},
+		})
+	}))
+
+	_, err := c.ReadRunRoleCheck(context.Background(), "ws-01J")
+	if err == nil {
+		t.Fatal("ReadRunRoleCheck returned no error")
+	}
+	if ErrorCode(err) != RunRoleMissingCode {
+		t.Errorf("ErrorCode = %q, want %s", ErrorCode(err), RunRoleMissingCode)
+	}
+}
+
 func TestGetVariableWithholdsASensitiveValue(t *testing.T) {
 	t.Parallel()
 

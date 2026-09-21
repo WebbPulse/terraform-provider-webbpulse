@@ -74,14 +74,27 @@ func (c *Client) DeleteWorkspace(ctx context.Context, workspaceID string) error 
 	return c.do(ctx, http.MethodDelete, workspacePath(workspaceID), nil, nil)
 }
 
-// CheckRunRole assumes the workspace's run role and reports whether it
-// answered. A configured role that does not answer is still a 200 with
-// Connected false; a workspace with no role at all is a 400 carrying
-// RunRoleMissingCode.
+// ReadRunRoleCheck assumes the workspace's run role and reports whether it
+// answered, without writing anything. The API records nothing for a GET, so
+// this is safe to call on every plan and refresh. A configured role that does
+// not answer is still a 200 with Connected false; a workspace with no role at
+// all is a 400 carrying RunRoleMissingCode.
+func (c *Client) ReadRunRoleCheck(ctx context.Context, workspaceID string) (*RunRoleCheck, error) {
+	var out RunRoleCheck
+	if err := c.do(ctx, http.MethodGet, runRoleCheckPath(workspaceID), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// CheckRunRole assumes the workspace's run role and records the outcome on the
+// workspace row, which is what the web UI shows between visits. Use
+// ReadRunRoleCheck when only the answer is wanted. A configured role that does
+// not answer is still a 200 with Connected false; a workspace with no role at
+// all is a 400 carrying RunRoleMissingCode.
 func (c *Client) CheckRunRole(ctx context.Context, workspaceID string) (*RunRoleCheck, error) {
 	var out RunRoleCheck
-	path := workspacePath(workspaceID) + "/run-role/check"
-	if err := c.do(ctx, http.MethodPost, path, nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, runRoleCheckPath(workspaceID), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -123,6 +136,10 @@ func (c *Client) DeleteVariable(ctx context.Context, workspaceID, key string) er
 
 func workspacePath(workspaceID string) string {
 	return "/workspaces/" + url.PathEscape(workspaceID)
+}
+
+func runRoleCheckPath(workspaceID string) string {
+	return workspacePath(workspaceID) + "/run-role/check"
 }
 
 func variablePath(workspaceID, key string) string {
