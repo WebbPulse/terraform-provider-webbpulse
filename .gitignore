@@ -1,0 +1,9 @@
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+terraform-provider-webbpulse
+dist/
+coverage.out
+.idea/
+.vscode/
