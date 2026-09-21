@@ -34,14 +34,13 @@ type WorkspaceCreate struct {
 	Description      string  `json:"description,omitempty"`
 }
 
-// WorkspaceUpdate is a partial workspace edit. Every field is omitted when nil,
-// which is what makes the PATCH partial. The name and the id are not editable.
+// WorkspaceUpdate omits nil fields; a pointer to a nil string clears a nullable field.
 type WorkspaceUpdate struct {
-	Engine           *string `json:"engine,omitempty"`
-	EngineVersion    *string `json:"engine_version,omitempty"`
-	RunRoleARN       *string `json:"run_role_arn,omitempty"`
-	WorkingDirectory *string `json:"working_directory,omitempty"`
-	Description      *string `json:"description,omitempty"`
+	Engine           *string  `json:"engine,omitempty"`
+	EngineVersion    *string  `json:"engine_version,omitempty"`
+	RunRoleARN       **string `json:"run_role_arn,omitempty"`
+	WorkingDirectory **string `json:"working_directory,omitempty"`
+	Description      **string `json:"description,omitempty"`
 }
 
 // WorkspaceList is the envelope every workspace listing returns.

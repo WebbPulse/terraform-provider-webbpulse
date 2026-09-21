@@ -212,9 +212,6 @@ func decodeError(resp *http.Response, payload []byte) error {
 	}
 
 	if apiErr.Message == "" {
-		apiErr.Message = strings.TrimSpace(string(payload))
-	}
-	if apiErr.Message == "" {
 		apiErr.Message = http.StatusText(resp.StatusCode)
 	}
 	return apiErr

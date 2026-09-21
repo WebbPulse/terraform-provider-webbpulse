@@ -225,7 +225,7 @@ func (r *variableResource) write(
 func applyVariable(from *client.Variable, into *variableModel) {
 	into.WorkspaceID = types.StringValue(from.WorkspaceID)
 	into.Key = types.StringValue(from.Key)
-	if from.Value != nil {
+	if !from.Sensitive && from.Value != nil {
 		into.Value = types.StringValue(*from.Value)
 	}
 	into.Category = types.StringValue(from.Category)

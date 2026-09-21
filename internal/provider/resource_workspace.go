@@ -85,8 +85,8 @@ func (r *workspaceResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Optional: true,
 				MarkdownDescription: "The role the runner assumes for this workspace. Optional on create: the " +
 					"role's trust policy names the workspace id as its external id, so the role cannot exist " +
-					"until the workspace does. Build it from `run_role_setup`, then set this. The API drops " +
-					"null fields from an edit, so this cannot be cleared once set, only pointed at another role.",
+					"until the workspace does. Build it from `run_role_setup`, then set this. Removing it " +
+					"sends an explicit null and clears the role and its recorded check outcome.",
 			},
 			"working_directory": schema.StringAttribute{
 				Optional:            true,
@@ -223,26 +223,25 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 
 	engine := plan.Engine.ValueString()
 	engineVersion := plan.EngineVersion.ValueString()
-	workingDirectory := plan.WorkingDirectory.ValueString()
-	description := plan.Description.ValueString()
+	workingDirectory := plan.WorkingDirectory.ValueStringPointer()
+	description := plan.Description.ValueStringPointer()
 	body := client.WorkspaceUpdate{
 		Engine:           &engine,
 		EngineVersion:    &engineVersion,
 		WorkingDirectory: &workingDirectory,
 		Description:      &description,
 	}
-	if !plan.RunRoleARN.IsNull() && !plan.RunRoleARN.IsUnknown() {
-		arn := plan.RunRoleARN.ValueString()
-		body.RunRoleARN = &arn
-	} else if !state.RunRoleARN.IsNull() {
+	if plan.RunRoleARN.IsUnknown() {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("run_role_arn"),
-			"The run role cannot be removed through the API",
-			"The control plane drops null fields from a workspace edit, so it has no way to clear "+
-				"run_role_arn once it is set. Point it at another role instead, or delete and recreate "+
-				"the workspace.",
+			"The run role is unknown",
+			"The run role must be known before updating the workspace.",
 		)
 		return
+	}
+	if !plan.RunRoleARN.Equal(state.RunRoleARN) {
+		arn := plan.RunRoleARN.ValueStringPointer()
+		body.RunRoleARN = &arn
 	}
 
 	updated, err := r.client.UpdateWorkspace(ctx, state.WorkspaceID.ValueString(), body)
