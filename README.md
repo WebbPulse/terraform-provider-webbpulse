@@ -58,6 +58,10 @@ id as its external id, so the role cannot exist until the workspace does. Create
 the workspace, build the role from the computed `run_role_setup`, then set
 `run_role_arn` in a second apply.
 
+Removing `run_role_arn` sends an explicit JSON null in the PATCH request and
+clears the role and its recorded check outcome. Unchanged role fields are omitted.
+This requires the API's JSON Merge Patch support (WebbPulse-Terraform PR64).
+
 Computed: `workspace_id`, `created_at`, `updated_at`, `run_role_setup`
 (`principal_arn`, `principal_arns`, `external_id`, `role_name`),
 `run_role_checked_at`, `run_role_account_id`.
@@ -81,6 +85,9 @@ API returns, which is what stops a permanent diff. Two consequences follow: a
 sensitive value changed outside Terraform cannot be detected, and a sensitive
 variable cannot be imported, so the import is refused with an explanation
 rather than silently producing an empty value.
+
+Terraform still stores the configured value in state. The sensitive marker hides
+normal CLI output; it does not encrypt state. Protect the state backend accordingly.
 
 ```sh
 terraform import webbpulse_variable.example ws-01JABCDEF0123456789ABCDEF/region
@@ -125,6 +132,8 @@ The client keeps the API's own error envelope. A 404 on a read removes the
 resource from state; every other status becomes a diagnostic carrying the API's
 `message`, its `error_code` and the request id, so a failure can be traced back
 to one request in the control plane's logs.
+Unstructured response bodies and validation detail payloads are not copied into
+diagnostics because they can contain submitted values.
 
 ## Development
 
@@ -158,9 +167,6 @@ The API does not yet expose everything the provider will want:
   per variable.
 - No route returns a sensitive variable's value, so drift on one cannot be
   detected and it cannot be imported.
-- A workspace edit drops null fields server side, so `run_role_arn` cannot be
-  cleared once it is set. The provider raises an error rather than reporting a
-  removal it cannot perform. Clearing it needs an API change.
 - No ETag or version on a workspace, so an update cannot be made conditional
   and a concurrent edit is last write wins.
 - No registry, so install is a local build plus `dev_overrides`. Publishing and

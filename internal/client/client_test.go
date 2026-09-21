@@ -123,7 +123,8 @@ func TestUpdateWorkspaceUsesPatchAndOmitsNilFields(t *testing.T) {
 	}))
 
 	description := "edited"
-	if _, err := c.UpdateWorkspace(context.Background(), "ws-01J", WorkspaceUpdate{Description: &description}); err != nil {
+	descriptionPointer := &description
+	if _, err := c.UpdateWorkspace(context.Background(), "ws-01J", WorkspaceUpdate{Description: &descriptionPointer}); err != nil {
 		t.Fatalf("UpdateWorkspace returned %v", err)
 	}
 
@@ -352,7 +353,7 @@ func TestNonJSONErrorBodyStillSurfaces(t *testing.T) {
 	if apiErr.StatusCode != http.StatusBadGateway {
 		t.Errorf("status = %d, want 502", apiErr.StatusCode)
 	}
-	if apiErr.Message != "upstream is down" {
-		t.Errorf("message = %q, want the raw body", apiErr.Message)
+	if apiErr.Message != "Bad Gateway" {
+		t.Errorf("message = %q, want the HTTP status without the raw body", apiErr.Message)
 	}
 }
