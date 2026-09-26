@@ -16,6 +16,7 @@ resource "webbpulse_workspace" "example" {
   engine_version    = "1.9.8"
   working_directory = "infra"
   description       = "Managed by the webbpulse provider"
+  force_delete      = false
 }
 
 resource "webbpulse_variable" "region" {

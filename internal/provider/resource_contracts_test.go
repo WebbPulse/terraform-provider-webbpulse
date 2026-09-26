@@ -244,3 +244,92 @@ func TestVariableMapping(t *testing.T) {
 		}
 	}
 }
+
+// TestWorkspaceDeleteHonoursForceAndExplainsRefusals checks force_delete maps
+// to force=true and each 409 names its code and the way out.
+func TestWorkspaceDeleteHonoursForceAndExplainsRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		force     bool
+		code      string
+		wantQuery string
+		wantParts []string
+	}{
+		{"default", false, "", "", nil},
+		{"forced", true, "", "force=true", nil},
+		{"manages resources", false, client.WorkspaceManagesResourcesCode, "", []string{client.WorkspaceManagesResourcesCode, "Destroy them first", "force_delete"}},
+		{"active run", true, client.WorkspaceHasActiveRunCode, "force=true", []string{client.WorkspaceHasActiveRunCode, "has not finished"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			calls := 0
+			r := &workspaceResource{client: contractClient(t, func(w http.ResponseWriter, req *http.Request) {
+				calls++
+				if req.Method != http.MethodDelete || req.URL.Path != "/api/v1/workspaces/ws-test" || req.URL.RawQuery != tc.wantQuery {
+					t.Errorf("unexpected request %s %s?%s", req.Method, req.URL.Path, req.URL.RawQuery)
+				}
+				if tc.code == "" {
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"status":409,"message":"Refused.","error_code":"` + tc.code + `","request_id":"req-delete"}`))
+			})}
+			state := resourceState(t, r, &workspaceModel{
+				WorkspaceID:  types.StringValue("ws-test"),
+				RunRoleSetup: types.ObjectNull(runRoleSetupAttrTypes()),
+				ForceDelete:  types.BoolValue(tc.force),
+			})
+			resp := resource.DeleteResponse{State: state}
+			r.Delete(ctx, resource.DeleteRequest{State: state}, &resp)
+			if calls != 1 {
+				t.Fatalf("got %d requests, want one delete", calls)
+			}
+			if len(tc.wantParts) == 0 {
+				if resp.Diagnostics.HasError() {
+					t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
+				}
+				return
+			}
+			if !resp.Diagnostics.HasError() {
+				t.Fatal("a refused delete raised no error")
+			}
+			detail := resp.Diagnostics[0].Detail()
+			for _, part := range append(tc.wantParts, "req-delete") {
+				if !strings.Contains(detail, part) {
+					t.Errorf("diagnostic %q omits %q", detail, part)
+				}
+			}
+		})
+	}
+}
+
+// TestWorkspaceForceDeleteSurvivesRefreshAndImport checks a refresh keeps the
+// configured flag and an import settles on the default instead of null.
+func TestWorkspaceForceDeleteSurvivesRefreshAndImport(t *testing.T) {
+	ctx := context.Background()
+	r := &workspaceResource{client: contractClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(client.Workspace{WorkspaceID: "ws-test", Name: "example", Engine: "terraform", EngineVersion: "1.9.8", CreatedAt: "created"})
+	})}
+	for _, tc := range []struct {
+		prior types.Bool
+		want  bool
+	}{
+		{types.BoolValue(true), true},
+		{types.BoolNull(), false},
+	} {
+		state := resourceState(t, r, &workspaceModel{WorkspaceID: types.StringValue("ws-test"), RunRoleSetup: types.ObjectNull(runRoleSetupAttrTypes()), ForceDelete: tc.prior})
+		resp := resource.ReadResponse{State: state}
+		r.Read(ctx, resource.ReadRequest{State: state}, &resp)
+		if resp.Diagnostics.HasError() {
+			t.Fatal(resp.Diagnostics)
+		}
+		var got workspaceModel
+		if diags := resp.State.Get(ctx, &got); diags.HasError() {
+			t.Fatal(diags)
+		}
+		if got.ForceDelete.IsNull() || got.ForceDelete.ValueBool() != tc.want {
+			t.Errorf("force_delete after refresh = %v, want %v", got.ForceDelete, tc.want)
+		}
+	}
+}

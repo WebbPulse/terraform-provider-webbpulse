@@ -5,9 +5,11 @@ import (
 
 	"github.com/WebbPulse/terraform-provider-webbpulse/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
@@ -41,6 +43,7 @@ type workspaceModel struct {
 	RunRoleSetup     types.Object `tfsdk:"run_role_setup"`
 	RunRoleCheckedAt types.String `tfsdk:"run_role_checked_at"`
 	RunRoleAccountID types.String `tfsdk:"run_role_account_id"`
+	ForceDelete      types.Bool   `tfsdk:"force_delete"`
 }
 
 func runRoleSetupAttrTypes() map[string]attr.Type {
@@ -103,6 +106,16 @@ func (r *workspaceResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Default:             stringdefault.StaticString(""),
 				MarkdownDescription: "A description for this workspace.",
 			},
+			"force_delete": schema.BoolAttribute{
+				Optional: true,
+				Computed: true,
+				Default:  booldefault.StaticBool(false),
+				MarkdownDescription: "Whether destroying this resource deletes the workspace even when its state " +
+					"still tracks resources, leaving them unmanaged. Defaults to `false`, so a workspace that " +
+					"still manages resources is refused with `WORKSPACE_MANAGES_RESOURCES` until they are " +
+					"destroyed. Set it and apply before the destroy, because a destroy reads it from state. It " +
+					"never skips the `WORKSPACE_HAS_ACTIVE_RUN` refusal while a run is active.",
+			},
 			"created_at": schema.StringAttribute{
 				Computed:            true,
 				MarkdownDescription: "When the workspace was created.",
@@ -114,12 +127,12 @@ func (r *workspaceResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 			},
 			"run_role_checked_at": schema.StringAttribute{
 				Computed: true,
-				MarkdownDescription: "When the run role last answered an AssumeRole, or null when it never " +
-					"has. A run role check writes this.",
+				MarkdownDescription: "When the run that proved the current run role assumed it, or null " +
+					"when none has. The web UI's run role check stamps this; the data source does not.",
 			},
 			"run_role_account_id": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The account the run role resolved to on its last successful check.",
+				MarkdownDescription: "The account the run role resolved to on its last stamped check.",
 			},
 			"run_role_setup": schema.SingleNestedAttribute{
 				Computed:      true,
@@ -183,7 +196,7 @@ func (r *workspaceResource) Create(ctx context.Context, req resource.CreateReque
 		return
 	}
 
-	state := workspaceModel{}
+	state := workspaceModel{ForceDelete: plan.ForceDelete}
 	resp.Diagnostics.Append(applyWorkspace(ctx, created, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -212,6 +225,9 @@ func (r *workspaceResource) Read(ctx context.Context, req resource.ReadRequest, 
 	resp.Diagnostics.Append(applyWorkspace(ctx, found, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
+	}
+	if state.ForceDelete.IsNull() {
+		state.ForceDelete = types.BoolValue(false)
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -243,7 +259,7 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 		return
 	}
 
-	next := workspaceModel{}
+	next := workspaceModel{ForceDelete: plan.ForceDelete}
 	resp.Diagnostics.Append(applyWorkspace(ctx, updated, &next)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -259,12 +275,33 @@ func (r *workspaceResource) Delete(ctx context.Context, req resource.DeleteReque
 		return
 	}
 
-	if err := r.client.DeleteWorkspace(ctx, state.WorkspaceID.ValueString()); err != nil {
-		if client.IsNotFound(err) {
-			return
-		}
-		resp.Diagnostics.Append(apiDiagnostic("Cannot delete the workspace", err))
+	err := r.client.DeleteWorkspace(ctx, state.WorkspaceID.ValueString(), state.ForceDelete.ValueBool())
+	if err == nil || client.IsNotFound(err) {
+		return
 	}
+	resp.Diagnostics.Append(deleteWorkspaceDiagnostic(err))
+}
+
+// deleteWorkspaceDiagnostic turns a refused workspace delete into a diagnostic
+// that names the API's error code and what to do about it.
+func deleteWorkspaceDiagnostic(err error) diag.Diagnostic {
+	switch client.ErrorCode(err) {
+	case client.WorkspaceManagesResourcesCode:
+		return diag.NewErrorDiagnostic(
+			"The workspace still manages resources",
+			client.WorkspaceManagesResourcesCode+": the workspace state still tracks resources, so deleting it "+
+				"would leave them running and unmanaged. Destroy them first with a destroy run on the "+
+				"workspace, or set force_delete = true on the webbpulse_workspace resource and apply that "+
+				"change before destroying to delete it anyway. "+err.Error(),
+		)
+	case client.WorkspaceHasActiveRunCode:
+		return diag.NewErrorDiagnostic(
+			"The workspace has an active run",
+			client.WorkspaceHasActiveRunCode+": a run on the workspace has not finished. Wait for it to "+
+				"finish or cancel it, then destroy again. force_delete does not skip this check. "+err.Error(),
+		)
+	}
+	return apiDiagnostic("Cannot delete the workspace", err)
 }
 
 // ImportState imports a workspace by its id.

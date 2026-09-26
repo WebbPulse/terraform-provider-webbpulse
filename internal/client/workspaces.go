@@ -11,6 +11,14 @@ import (
 // run role ARN yet.
 const RunRoleMissingCode = "RUN_ROLE_MISSING"
 
+// WorkspaceManagesResourcesCode is the stable code a 409 on delete carries when
+// the workspace state still tracks resources. A forced delete skips it.
+const WorkspaceManagesResourcesCode = "WORKSPACE_MANAGES_RESOURCES"
+
+// WorkspaceHasActiveRunCode is the stable code a 409 on delete carries while a
+// run on the workspace has not finished. A forced delete does not skip it.
+const WorkspaceHasActiveRunCode = "WORKSPACE_HAS_ACTIVE_RUN"
+
 // CreateWorkspace creates a workspace and returns it. The run role is optional
 // here because the role's trust policy names the workspace id as its external
 // id, so the role cannot exist until the workspace does.
@@ -70,16 +78,24 @@ func (c *Client) UpdateWorkspace(ctx context.Context, workspaceID string, body W
 	return &out, nil
 }
 
-// DeleteWorkspace deletes one workspace and its variables.
-func (c *Client) DeleteWorkspace(ctx context.Context, workspaceID string) error {
-	return c.do(ctx, http.MethodDelete, workspacePath(workspaceID), nil, nil)
+// DeleteWorkspace deletes one workspace with its finished runs, state and
+// variables. A workspace whose state still tracks resources is refused with
+// WorkspaceManagesResourcesCode unless force is set, and one with an active run
+// is refused with WorkspaceHasActiveRunCode either way.
+func (c *Client) DeleteWorkspace(ctx context.Context, workspaceID string, force bool) error {
+	path := workspacePath(workspaceID)
+	if force {
+		path += "?force=true"
+	}
+	return c.do(ctx, http.MethodDelete, path, nil, nil)
 }
 
-// ReadRunRoleCheck assumes the workspace's run role and reports whether it
-// answered, without writing anything. The API records nothing for a GET, so
-// this is safe to call on every plan and refresh. A configured role that does
-// not answer is still a 200 with Connected false; a workspace with no role at
-// all is a 400 carrying RunRoleMissingCode.
+// ReadRunRoleCheck reports whether the runner has assumed the workspace's run
+// role, from the runner's own record, without writing anything. The API never
+// calls STS and records nothing for a GET, so this is safe to call on every plan
+// and refresh. A configured role is always a 200, with Status unverified until a
+// run has tried it; a workspace with no role at all is a 400 carrying
+// RunRoleMissingCode.
 func (c *Client) ReadRunRoleCheck(ctx context.Context, workspaceID string) (*RunRoleCheck, error) {
 	var out RunRoleCheck
 	if err := c.do(ctx, http.MethodGet, runRoleCheckPath(workspaceID), nil, &out); err != nil {
