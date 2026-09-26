@@ -11,20 +11,31 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
+const (
+	connectedCheck  = `{"connected":true,"status":"connected","account_id":"123456789012","error":null,"run_id":"run-01J","checked_at":"2026-09-25T12:00:00Z"}`
+	failedCheck     = `{"connected":false,"status":"failed","account_id":null,"error":"Trust policy refused the runner","run_id":"run-01J","checked_at":"2026-09-25T12:00:00Z"}`
+	unverifiedCheck = `{"connected":false,"status":"unverified","account_id":null,"error":null,"run_id":null,"checked_at":null}`
+)
+
 // TestRunRoleDataSourceOnlyReads checks repeated reads and failures without a POST fallback.
 func TestRunRoleDataSourceOnlyReads(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		status    int
-		body      string
-		wantError bool
-		connected bool
+		name       string
+		status     int
+		body       string
+		failIfNot  bool
+		wantError  string
+		wantStatus string
 	}{
-		{"connected", 200, `{"connected":true,"account_id":"123456789012","error":null}`, false, true},
-		{"unconnected", 200, `{"connected":false,"account_id":null,"error":"Trust policy refused the probe"}`, false, false},
-		{"missing role", 400, `{"detail":{"message":"Set run_role_arn","error_code":"RUN_ROLE_MISSING"}}`, true, false},
-		{"missing gateway route", 404, `{"message":"Not Found"}`, true, false},
-		{"forbidden", 403, `{"message":"Forbidden"}`, true, false},
+		{"connected", 200, connectedCheck, false, "", "connected"},
+		{"connected strict", 200, connectedCheck, true, "", "connected"},
+		{"failed", 200, failedCheck, false, "", "failed"},
+		{"unverified", 200, unverifiedCheck, false, "", "unverified"},
+		{"failed strict", 200, failedCheck, true, "Trust policy refused the runner", ""},
+		{"unverified strict", 200, unverifiedCheck, true, "plan-only run", ""},
+		{"missing role", 400, `{"detail":{"message":"Set run_role_arn","error_code":"RUN_ROLE_MISSING"}}`, false, "run_role_arn", ""},
+		{"missing gateway route", 404, `{"message":"Not Found"}`, false, "404", ""},
+		{"forbidden", 403, `{"message":"Forbidden"}`, false, "403", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -40,26 +51,35 @@ func TestRunRoleDataSourceOnlyReads(t *testing.T) {
 			var schema datasource.SchemaResponse
 			d.Schema(ctx, datasource.SchemaRequest{}, &schema)
 			config := tfsdk.State{Schema: schema.Schema}
-			if diags := config.Set(ctx, &runRoleCheckModel{WorkspaceID: types.StringValue("ws-test")}); diags.HasError() {
+			model := runRoleCheckModel{WorkspaceID: types.StringValue("ws-test")}
+			if tc.failIfNot {
+				model.FailIfNotConnected = types.BoolValue(true)
+			}
+			if diags := config.Set(ctx, &model); diags.HasError() {
 				t.Fatal(diags)
 			}
 			for range 2 {
 				resp := datasource.ReadResponse{State: tfsdk.State{Schema: schema.Schema}}
 				d.Read(ctx, datasource.ReadRequest{Config: tfsdk.Config(config)}, &resp)
-				if resp.Diagnostics.HasError() != tc.wantError {
+				if tc.wantError != "" {
+					if !resp.Diagnostics.HasError() || !strings.Contains(resp.Diagnostics[0].Detail(), tc.wantError) {
+						t.Fatalf("diagnostics %v do not carry %q", resp.Diagnostics, tc.wantError)
+					}
+					continue
+				}
+				if resp.Diagnostics.HasError() {
 					t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
 				}
-				if !tc.wantError {
-					var got runRoleCheckModel
-					if diags := resp.State.Get(ctx, &got); diags.HasError() {
-						t.Fatal(diags)
-					}
-					if got.Connected.ValueBool() != tc.connected || got.AccountID.IsNull() == tc.connected || got.Error.IsNull() != tc.connected {
-						t.Fatal("check state did not reflect the response")
-					}
+				var got runRoleCheckModel
+				if diags := resp.State.Get(ctx, &got); diags.HasError() {
+					t.Fatal(diags)
 				}
-				if tc.name == "missing role" && !strings.Contains(resp.Diagnostics[0].Detail(), "run_role_arn") {
-					t.Fatal("missing role diagnostic omitted the actionable field")
+				connected := tc.wantStatus == "connected"
+				verified := tc.wantStatus != "unverified"
+				if got.Status.ValueString() != tc.wantStatus || got.Connected.ValueBool() != connected ||
+					got.AccountID.IsNull() == connected || got.RunID.IsNull() == verified ||
+					got.CheckedAt.IsNull() == verified || got.Error.IsNull() != (tc.wantStatus != "failed") {
+					t.Fatalf("check state did not reflect the response: %+v", got)
 				}
 			}
 			if calls != 2 {

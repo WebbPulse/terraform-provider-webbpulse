@@ -74,12 +74,24 @@ type VariableList struct {
 	Items []Variable `json:"items"`
 }
 
-// RunRoleCheck is the outcome of one AssumeRole against a workspace's run role.
+// RunRoleCheck is the runner's record of its newest AssumeRole against a
+// workspace's current run role. The API never calls STS itself.
 type RunRoleCheck struct {
 	Connected bool    `json:"connected"`
+	Status    string  `json:"status"`
 	AccountID *string `json:"account_id"`
 	Error     *string `json:"error"`
+	RunID     *string `json:"run_id"`
+	CheckedAt *string `json:"checked_at"`
 }
+
+// Run role check status values. Unverified means no run has tried the current
+// role yet, so a plan-only run is the check.
+const (
+	RunRoleStatusConnected  = "connected"
+	RunRoleStatusFailed     = "failed"
+	RunRoleStatusUnverified = "unverified"
+)
 
 // Engine values a workspace may carry.
 const (

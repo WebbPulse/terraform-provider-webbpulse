@@ -172,6 +172,9 @@ func TestWorkspaceComputedAttributes(t *testing.T) {
 	if !resp.Schema.Attributes["engine_version"].IsRequired() {
 		t.Error("engine_version is not required")
 	}
+	if force := resp.Schema.Attributes["force_delete"]; force == nil || !force.IsOptional() {
+		t.Error("force_delete is not optional")
+	}
 }
 
 // TestRunRoleCheckDataSourceReturnsItsOutcome checks the run role check exposes its outcome attributes.
@@ -181,7 +184,7 @@ func TestRunRoleCheckDataSourceReturnsItsOutcome(t *testing.T) {
 	resp := &datasource.SchemaResponse{}
 	NewRunRoleCheckDataSource().Schema(context.Background(), datasource.SchemaRequest{}, resp)
 
-	for _, name := range []string{"connected", "account_id", "error"} {
+	for _, name := range []string{"status", "connected", "account_id", "error", "run_id", "checked_at"} {
 		attribute, ok := resp.Schema.Attributes[name]
 		if !ok {
 			t.Errorf("the run role check has no %q attribute", name)
@@ -193,5 +196,8 @@ func TestRunRoleCheckDataSourceReturnsItsOutcome(t *testing.T) {
 	}
 	if !resp.Schema.Attributes["workspace_id"].IsRequired() {
 		t.Error("workspace_id is not required")
+	}
+	if fail := resp.Schema.Attributes["fail_if_not_connected"]; fail == nil || !fail.IsOptional() || fail.IsComputed() {
+		t.Error("fail_if_not_connected is not an optional input")
 	}
 }

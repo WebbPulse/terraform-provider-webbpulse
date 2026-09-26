@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -195,8 +196,11 @@ func TestReadRunRoleCheckUsesTheReadOnlyRoute(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"connected":  true,
+			"status":     RunRoleStatusConnected,
 			"account_id": "870550636948",
 			"error":      nil,
+			"run_id":     "run-01J",
+			"checked_at": "2026-09-25T12:00:00Z",
 		})
 	}))
 
@@ -213,6 +217,12 @@ func TestReadRunRoleCheckUsesTheReadOnlyRoute(t *testing.T) {
 		}
 		if got.Error != nil {
 			t.Errorf("error = %v, want nil", *got.Error)
+		}
+		if got.Status != RunRoleStatusConnected {
+			t.Errorf("status = %q, want connected", got.Status)
+		}
+		if got.RunID == nil || *got.RunID != "run-01J" || got.CheckedAt == nil || *got.CheckedAt != "2026-09-25T12:00:00Z" {
+			t.Errorf("run id %v and checked at %v, want the proving run", got.RunID, got.CheckedAt)
 		}
 	}
 
@@ -237,8 +247,11 @@ func TestReadRunRoleCheckDecodesAnUnconnectedOutcome(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"connected":  false,
+			"status":     RunRoleStatusFailed,
 			"account_id": nil,
 			"error":      "The role does not trust the runner or the external id does not match",
+			"run_id":     "run-01J",
+			"checked_at": "2026-09-25T12:00:00Z",
 		})
 	}))
 
@@ -254,6 +267,30 @@ func TestReadRunRoleCheckDecodesAnUnconnectedOutcome(t *testing.T) {
 	}
 	if got.Error == nil {
 		t.Fatal("error = nil, want the reason")
+	}
+	if got.Status != RunRoleStatusFailed || got.RunID == nil {
+		t.Errorf("status %q and run id %v, want failed with the run", got.Status, got.RunID)
+	}
+}
+
+// TestReadRunRoleCheckDecodesAnUnverifiedOutcome checks a role no run has tried decodes with null run fields.
+func TestReadRunRoleCheckDecodesAnUnverifiedOutcome(t *testing.T) {
+	t.Parallel()
+
+	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"connected":false,"status":"unverified","account_id":null,"error":null,"run_id":null,"checked_at":null}`))
+	}))
+
+	got, err := c.ReadRunRoleCheck(context.Background(), "ws-01J")
+	if err != nil {
+		t.Fatalf("ReadRunRoleCheck returned %v", err)
+	}
+	if got.Connected || got.Status != RunRoleStatusUnverified {
+		t.Errorf("connected %v and status %q, want an unverified outcome", got.Connected, got.Status)
+	}
+	if got.RunID != nil || got.CheckedAt != nil || got.Error != nil {
+		t.Error("an unverified outcome carried run fields")
 	}
 }
 
@@ -328,16 +365,56 @@ func TestPutVariableEscapesTheKeyInThePath(t *testing.T) {
 	}
 }
 
-// TestDeleteWorkspaceAcceptsNoContent checks a 204 delete succeeds.
+// TestDeleteWorkspaceAcceptsNoContent checks a 204 delete succeeds and sends
+// force=true only for a forced delete.
 func TestDeleteWorkspaceAcceptsNoContent(t *testing.T) {
 	t.Parallel()
 
-	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	}))
+	for _, tc := range []struct {
+		force     bool
+		wantQuery string
+	}{
+		{false, ""},
+		{true, "force=true"},
+	} {
+		c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodDelete || r.URL.Path != "/api/v1/workspaces/ws-01J" {
+				t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			}
+			if r.URL.RawQuery != tc.wantQuery {
+				t.Errorf("force %v: query = %q, want %q", tc.force, r.URL.RawQuery, tc.wantQuery)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}))
 
-	if err := c.DeleteWorkspace(context.Background(), "ws-01J"); err != nil {
-		t.Fatalf("DeleteWorkspace returned %v", err)
+		if err := c.DeleteWorkspace(context.Background(), "ws-01J", tc.force); err != nil {
+			t.Fatalf("DeleteWorkspace returned %v", err)
+		}
+	}
+}
+
+// TestDeleteWorkspaceSurfacesConflictCodes checks both delete refusals keep their error codes.
+func TestDeleteWorkspaceSurfacesConflictCodes(t *testing.T) {
+	t.Parallel()
+
+	for _, code := range []string{WorkspaceManagesResourcesCode, WorkspaceHasActiveRunCode} {
+		c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":     http.StatusConflict,
+				"message":    "The workspace cannot be deleted yet.",
+				"error_code": code,
+			})
+		}))
+
+		err := c.DeleteWorkspace(context.Background(), "ws-01J", false)
+		if ErrorCode(err) != code {
+			t.Errorf("ErrorCode = %q, want %s", ErrorCode(err), code)
+		}
+		if !strings.Contains(err.Error(), "409") {
+			t.Errorf("error %q lost its status", err)
+		}
 	}
 }
 

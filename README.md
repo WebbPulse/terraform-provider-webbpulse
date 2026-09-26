@@ -63,6 +63,19 @@ Removing `run_role_arn`, `working_directory` or `description` from the
 configuration sends an explicit JSON null, which clears the field on the API;
 clearing `run_role_arn` also drops the recorded check outcome.
 
+Deleting a workspace is refused with a 409 carrying
+`WORKSPACE_MANAGES_RESOURCES` while its state tracks any resource (a state the
+API cannot parse counts as tracking some), so a destroy never strands running
+infrastructure. Destroy those resources first with a destroy run on the
+workspace, or set `force_delete = true` to delete it anyway and leave them
+unmanaged. As with the tfe provider's `force_delete`, the flag is read from
+state, so apply it before the destroy. It sends `?force=true` and skips only
+that check: a workspace with an unfinished run is refused with
+`WORKSPACE_HAS_ACTIVE_RUN` either way. Both refusals surface as diagnostics
+naming the code.
+
+Optional: `force_delete` (default `false`).
+
 Computed: `workspace_id`, `created_at`, `updated_at`, `run_role_setup`
 (`principal_arn`, `principal_arns`, `external_id`, `role_name`),
 `run_role_checked_at`, `run_role_account_id`.
@@ -101,22 +114,34 @@ terraform import webbpulse_variable.example ws-01JABCDEF0123456789ABCDEF/region
   by name lists every workspace and filters in the provider.
 - `webbpulse_workspaces` returns every workspace's `ids` and `names`. The API
   takes no filters on its listing route.
-- `webbpulse_run_role_check` assumes a workspace's run role and returns
-  `connected`, `account_id` and `error`.
+- `webbpulse_run_role_check` reports whether the runner has assumed a
+  workspace's run role and returns `status`, `connected`, `account_id`,
+  `error`, `run_id` and `checked_at`.
 
 ## The run role check
 
 The `webbpulse_run_role_check` data source calls
-`GET /workspaces/{id}/run-role/check`, which performs the AssumeRole and records
-nothing, so a plan or refresh never changes the workspace. It needs the
-`workspaces:read` scope. The `POST` form of the same route, which stamps the
-outcome on the workspace for the web UI, is deliberately not used.
+`GET /workspaces/{id}/run-role/check`, which records nothing, so a plan or
+refresh never changes the workspace. It needs the `workspaces:read` scope. The
+`POST` form of the same route, which stamps the outcome on the workspace for the
+web UI, is deliberately not used.
 
-A configured role that does not answer is a 200 with `connected` false, not an
-error: the trust policy may simply not be in place yet. The data source reports
-it as `connected = false` with the reason in `error`. A workspace with no role
-at all is a 400 carrying `RUN_ROLE_MISSING`, which surfaces as an error naming
-`run_role_arn`.
+The API never calls STS. The answer comes from the runner's own record: the
+outcome of the AssumeRole in the newest run made with the current role ARN.
+`status` is one of:
+
+- `connected`: that run assumed the role. `account_id`, `run_id` and
+  `checked_at` name the account and the run that proved it.
+- `failed`: that run was refused. `error` carries the reason and `run_id` the
+  run.
+- `unverified`: no plan has run on this role yet, so there is nothing to report
+  and `run_id` and `checked_at` are null. A plan-only run is the check.
+
+By default every status is data, not an error, because the trust policy may
+simply not be in place yet. Set `fail_if_not_connected = true` to fail the read
+on anything other than `connected`, including `unverified`. A workspace with no
+role at all is a 400 carrying `RUN_ROLE_MISSING`, which surfaces as an error
+naming `run_role_arn`.
 
 ## Errors
 
