@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/WebbPulse/terraform-provider-webbpulse/internal/client"
@@ -37,54 +38,133 @@ func resourceState(t *testing.T, r resource.Resource, model any) tfsdk.State {
 	return state
 }
 
-// TestWorkspaceUpdateRoleLifecycle checks null PATCHes and the resulting Terraform state.
-func TestWorkspaceUpdateRoleLifecycle(t *testing.T) {
+// TestWorkspaceUpdateMergePatch checks the PATCH body carries only changed
+// fields and an explicit null for each clearable attribute removed from config.
+func TestWorkspaceUpdateMergePatch(t *testing.T) {
+	role := types.StringValue("arn:aws:iam::123456789012:role/example")
 	for _, tc := range []struct {
-		name    string
-		old     types.String
-		next    types.String
-		present bool
+		name string
+		edit func(*workspaceModel)
+		want string
 	}{
-		{"attach", types.StringNull(), types.StringValue("arn:aws:iam::123456789012:role/example"), true},
-		{"clear", types.StringValue("arn:aws:iam::123456789012:role/example"), types.StringNull(), true},
-		{"unchanged", types.StringValue("arn:aws:iam::123456789012:role/example"), types.StringValue("arn:aws:iam::123456789012:role/example"), false},
-		{"still absent", types.StringNull(), types.StringNull(), false},
+		{"attach role", func(m *workspaceModel) { m.RunRoleARN = role }, `{"run_role_arn":"arn:aws:iam::123456789012:role/example"}`},
+		{"no change", func(*workspaceModel) {}, `{}`},
+		{"engine version", func(m *workspaceModel) { m.EngineVersion = types.StringValue("1.10.0") }, `{"engine_version":"1.10.0"}`},
+		{"set description", func(m *workspaceModel) { m.Description = types.StringValue("new") }, `{"description":"new"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
-			calls := 0
-			r := &workspaceResource{client: contractClient(t, func(w http.ResponseWriter, req *http.Request) {
-				calls++
-				if req.Method != http.MethodPatch || req.URL.Path != "/api/v1/workspaces/ws-test" {
-					t.Errorf("unexpected request %s %s", req.Method, req.URL.Path)
-				}
-				var body map[string]any
-				if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-					t.Error(err)
-				}
-				value, present := body["run_role_arn"]
-				if present != tc.present || (present && tc.next.IsNull() && value != nil) || (present && !tc.next.IsNull() && value != tc.next.ValueString()) {
-					t.Errorf("unexpected role PATCH: %v", body)
-				}
-				_ = json.NewEncoder(w).Encode(client.Workspace{WorkspaceID: "ws-test", Name: "example", Engine: "terraform", EngineVersion: "1.9.8", RunRoleARN: tc.next.ValueStringPointer(), CreatedAt: "created"})
-			})}
-			model := workspaceModel{WorkspaceID: types.StringValue("ws-test"), Name: types.StringValue("example"), Engine: types.StringValue("terraform"), EngineVersion: types.StringValue("1.9.8"), RunRoleARN: tc.old, Description: types.StringValue(""), WorkingDirectory: types.StringValue(""), RunRoleSetup: types.ObjectNull(runRoleSetupAttrTypes()), RunRoleCheckedAt: types.StringValue("old-check"), RunRoleAccountID: types.StringValue("123456789012")}
-			prior := resourceState(t, r, &model)
-			model.RunRoleARN = tc.next
-			planned := resourceState(t, r, &model)
-			resp := resource.UpdateResponse{State: prior}
-			r.Update(ctx, resource.UpdateRequest{State: prior, Plan: tfsdk.Plan(planned)}, &resp)
-			if resp.Diagnostics.HasError() {
-				t.Fatal(resp.Diagnostics)
-			}
-			var got workspaceModel
-			if diags := resp.State.Get(ctx, &got); diags.HasError() {
-				t.Fatal(diags)
-			}
-			if calls != 1 || !got.RunRoleARN.Equal(tc.next) || !got.RunRoleCheckedAt.IsNull() || !got.RunRoleAccountID.IsNull() {
-				t.Fatal("workspace state did not follow the PATCH response")
-			}
+			prior := workspaceModel{RunRoleARN: types.StringNull(), Description: types.StringValue(""), WorkingDirectory: types.StringValue("")}
+			assertWorkspacePatch(t, prior, tc.edit, tc.want)
 		})
+	}
+	for _, tc := range []struct {
+		name string
+		edit func(*workspaceModel)
+		want string
+	}{
+		{"clear role", func(m *workspaceModel) { m.RunRoleARN = types.StringNull() }, `{"run_role_arn":null}`},
+		{"clear working directory", func(m *workspaceModel) { m.WorkingDirectory = types.StringValue("") }, `{"working_directory":null}`},
+		{"clear description", func(m *workspaceModel) { m.Description = types.StringValue("") }, `{"description":null}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			prior := workspaceModel{RunRoleARN: role, Description: types.StringValue("old"), WorkingDirectory: types.StringValue("infra")}
+			assertWorkspacePatch(t, prior, tc.edit, tc.want)
+		})
+	}
+}
+
+// assertWorkspacePatch runs one workspace Update from prior to the edited plan
+// and checks the exact PATCH body and that state follows the response.
+func assertWorkspacePatch(t *testing.T, prior workspaceModel, edit func(*workspaceModel), want string) {
+	t.Helper()
+	ctx := context.Background()
+	prior.WorkspaceID = types.StringValue("ws-test")
+	prior.Name = types.StringValue("example")
+	prior.Engine = types.StringValue("terraform")
+	prior.EngineVersion = types.StringValue("1.9.8")
+	prior.RunRoleSetup = types.ObjectNull(runRoleSetupAttrTypes())
+	prior.RunRoleCheckedAt = types.StringValue("old-check")
+	prior.RunRoleAccountID = types.StringValue("123456789012")
+	next := prior
+	edit(&next)
+
+	calls := 0
+	r := &workspaceResource{client: contractClient(t, func(w http.ResponseWriter, req *http.Request) {
+		calls++
+		if req.Method != http.MethodPatch || req.URL.Path != "/api/v1/workspaces/ws-test" {
+			t.Errorf("unexpected request %s %s", req.Method, req.URL.Path)
+		}
+		var body json.RawMessage
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		if string(body) != want {
+			t.Errorf("PATCH body = %s, want %s", body, want)
+		}
+		_ = json.NewEncoder(w).Encode(client.Workspace{
+			WorkspaceID: "ws-test", Name: "example", Engine: "terraform", EngineVersion: next.EngineVersion.ValueString(),
+			RunRoleARN: next.RunRoleARN.ValueStringPointer(), WorkingDirectory: next.WorkingDirectory.ValueString(),
+			Description: next.Description.ValueString(), CreatedAt: "created",
+		})
+	})}
+	priorState := resourceState(t, r, &prior)
+	planned := resourceState(t, r, &next)
+	resp := resource.UpdateResponse{State: priorState}
+	r.Update(ctx, resource.UpdateRequest{State: priorState, Plan: tfsdk.Plan(planned)}, &resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatal(resp.Diagnostics)
+	}
+	var got workspaceModel
+	if diags := resp.State.Get(ctx, &got); diags.HasError() {
+		t.Fatal(diags)
+	}
+	if calls != 1 || !got.RunRoleARN.Equal(next.RunRoleARN) || !got.Description.Equal(next.Description) ||
+		!got.WorkingDirectory.Equal(next.WorkingDirectory) {
+		t.Fatal("workspace state did not follow the PATCH response")
+	}
+}
+
+// TestReadDropsDeletedResources checks a 404 on refresh removes the resource
+// from state instead of failing the plan.
+func TestReadDropsDeletedResources(t *testing.T) {
+	ctx := context.Background()
+	notFound := func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"Not found.","error_code":"NOT_FOUND"}`))
+	}
+
+	ws := &workspaceResource{client: contractClient(t, notFound)}
+	wsState := resourceState(t, ws, &workspaceModel{WorkspaceID: types.StringValue("ws-test"), RunRoleSetup: types.ObjectNull(runRoleSetupAttrTypes())})
+	wsResp := resource.ReadResponse{State: wsState}
+	ws.Read(ctx, resource.ReadRequest{State: wsState}, &wsResp)
+	if wsResp.Diagnostics.HasError() || !wsResp.State.Raw.IsNull() {
+		t.Fatalf("workspace 404 was not dropped from state: %v", wsResp.Diagnostics)
+	}
+
+	v := &variableResource{client: contractClient(t, notFound)}
+	vState := resourceState(t, v, &variableModel{WorkspaceID: types.StringValue("ws-test"), Key: types.StringValue("example")})
+	vResp := resource.ReadResponse{State: vState}
+	v.Read(ctx, resource.ReadRequest{State: vState}, &vResp)
+	if vResp.Diagnostics.HasError() || !vResp.State.Raw.IsNull() {
+		t.Fatalf("variable 404 was not dropped from state: %v", vResp.Diagnostics)
+	}
+}
+
+// TestVariableCreateRefusesAnExistingKey checks create does not silently
+// overwrite a variable through the upserting PUT route.
+func TestVariableCreateRefusesAnExistingKey(t *testing.T) {
+	ctx := context.Background()
+	r := &variableResource{client: contractClient(t, func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodGet {
+			t.Errorf("unexpected %s after finding an existing variable", req.Method)
+		}
+		_ = json.NewEncoder(w).Encode(client.Variable{WorkspaceID: "ws-test", Key: "example", Category: "terraform", CreatedAt: "created"})
+	})}
+	planned := resourceState(t, r, &variableModel{WorkspaceID: types.StringValue("ws-test"), Key: types.StringValue("example"), Value: types.StringValue("v"), Category: types.StringValue("terraform"), Sensitive: types.BoolValue(false), Description: types.StringValue("")})
+	resp := resource.CreateResponse{State: tfsdk.State{Schema: planned.Schema}}
+	r.Create(ctx, resource.CreateRequest{Plan: tfsdk.Plan(planned)}, &resp)
+	if !resp.Diagnostics.HasError() {
+		t.Fatal("create over an existing variable was accepted")
 	}
 }
 
@@ -96,6 +176,11 @@ func TestSensitiveVariableLifecycle(t *testing.T) {
 		methods = append(methods, req.Method)
 		if req.URL.Path != "/api/v1/workspaces/ws-test/variables/example" {
 			t.Errorf("unexpected path %s", req.URL.Path)
+		}
+		if len(methods) == 1 {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"No such variable.","error_code":"NOT_FOUND"}`))
+			return
 		}
 		if req.Method == http.MethodPut {
 			var body client.VariableWrite
@@ -139,7 +224,7 @@ func TestSensitiveVariableLifecycle(t *testing.T) {
 	if !imported.Diagnostics.HasError() {
 		t.Fatal("sensitive import was accepted")
 	}
-	if len(methods) != 4 || methods[0] != "PUT" || methods[1] != "PUT" || methods[2] != "GET" || methods[3] != "GET" {
+	if strings.Join(methods, " ") != "GET PUT PUT GET GET" {
 		t.Fatalf("unexpected lifecycle requests %v", methods)
 	}
 }

@@ -26,10 +26,12 @@ type workspacesModel struct {
 	Names types.List `tfsdk:"names"`
 }
 
+// Metadata sets the type name of the workspaces data source.
 func (d *workspacesDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_workspaces"
 }
 
+// Schema defines the schema of the workspaces data source.
 func (d *workspacesDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Every workspace in the environment. The API takes no filters on its listing " +
@@ -49,10 +51,12 @@ func (d *workspacesDataSource) Schema(_ context.Context, _ datasource.SchemaRequ
 	}
 }
 
+// Configure stores the shared API client on the workspaces data source.
 func (d *workspacesDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
 	configureClient(req.ProviderData, &d.client, &resp.Diagnostics)
 }
 
+// Read lists every workspace id and name.
 func (d *workspacesDataSource) Read(ctx context.Context, _ datasource.ReadRequest, resp *datasource.ReadResponse) {
 	items, err := d.client.ListWorkspaces(ctx)
 	if err != nil {

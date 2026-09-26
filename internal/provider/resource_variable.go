@@ -40,10 +40,12 @@ type variableModel struct {
 	UpdatedAt   types.String `tfsdk:"updated_at"`
 }
 
+// Metadata sets the type name of the variable resource.
 func (r *variableResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_variable"
 }
 
+// Schema defines the schema of the variable resource.
 func (r *variableResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "One variable on one workspace. The API never returns a sensitive value, so the " +
@@ -99,21 +101,42 @@ func (r *variableResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 	}
 }
 
+// Configure stores the shared API client on the variable resource.
 func (r *variableResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	configureClient(req.ProviderData, &r.client, &resp.Diagnostics)
 }
 
+// Create creates the variable, refusing a key that already exists since the PUT route upserts.
 func (r *variableResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan variableModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	_, err := r.client.GetVariable(ctx, plan.WorkspaceID.ValueString(), plan.Key.ValueString())
+	if err == nil {
+		resp.Diagnostics.AddError(
+			"The variable already exists",
+			fmt.Sprintf(
+				"Variable %q already exists on workspace %q. The API's PUT route upserts, so creating it "+
+					"would silently overwrite the stored value. Import it, or delete it first.",
+				plan.Key.ValueString(), plan.WorkspaceID.ValueString(),
+			),
+		)
+		return
+	}
+	if !client.IsNotFound(err) {
+		resp.Diagnostics.Append(apiDiagnostic("Cannot check whether the variable exists", err))
+		return
+	}
+
 	r.write(ctx, plan, &resp.Diagnostics, func(state variableModel) {
 		resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 	})
 }
 
+// Read refreshes the variable, keeping a sensitive value from state and dropping the resource on a 404.
 func (r *variableResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	var state variableModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
@@ -135,6 +158,7 @@ func (r *variableResource) Read(ctx context.Context, req resource.ReadRequest, r
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
+// Update rewrites the variable through the upserting PUT route.
 func (r *variableResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan variableModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -146,6 +170,7 @@ func (r *variableResource) Update(ctx context.Context, req resource.UpdateReques
 	})
 }
 
+// Delete deletes the variable resource, treating a 404 as already gone.
 func (r *variableResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	var state variableModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
@@ -159,6 +184,7 @@ func (r *variableResource) Delete(ctx context.Context, req resource.DeleteReques
 	}
 }
 
+// ImportState imports a variable by <workspace_id>/<key>, refusing a sensitive one.
 func (r *variableResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	workspaceID, key, ok := strings.Cut(req.ID, "/")
 	if !ok || workspaceID == "" || key == "" {

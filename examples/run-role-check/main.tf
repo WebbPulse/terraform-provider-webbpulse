@@ -31,9 +31,3 @@ output "run_role_account_id" {
 output "run_role_error" {
   value = data.webbpulse_run_role_check.example.error
 }
-
-action "webbpulse_run_role_check" "example" {
-  config {
-    workspace_id = webbpulse_workspace.example.workspace_id
-  }
-}

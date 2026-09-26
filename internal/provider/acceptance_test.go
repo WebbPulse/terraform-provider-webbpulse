@@ -38,6 +38,7 @@ func testAccName(prefix string) string {
 	return fmt.Sprintf("tfacc-%s-%d", prefix, time.Now().UnixNano())
 }
 
+// TestAccWorkspace exercises the workspace lifecycle, clearing and import against a live API.
 func TestAccWorkspace(t *testing.T) {
 	testAccPreCheck(t)
 
@@ -78,6 +79,19 @@ resource "webbpulse_workspace" "test" {
 				),
 			},
 			{
+				Config: fmt.Sprintf(`
+resource "webbpulse_workspace" "test" {
+  name           = %q
+  engine_version = "1.10.0"
+}
+`, name),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("webbpulse_workspace.test", "description", ""),
+					resource.TestCheckResourceAttr("webbpulse_workspace.test", "working_directory", ""),
+					resource.TestCheckNoResourceAttr("webbpulse_workspace.test", "run_role_arn"),
+				),
+			},
+			{
 				ResourceName:                         "webbpulse_workspace.test",
 				ImportState:                          true,
 				ImportStateVerify:                    true,
@@ -94,6 +108,7 @@ resource "webbpulse_workspace" "test" {
 	})
 }
 
+// TestAccVariable exercises plain and sensitive variables against a live API.
 func TestAccVariable(t *testing.T) {
 	testAccPreCheck(t)
 
@@ -183,6 +198,7 @@ resource "webbpulse_variable" "secret" {
 	})
 }
 
+// TestAccWorkspaceDataSource looks a workspace up by id and by name against a live API.
 func TestAccWorkspaceDataSource(t *testing.T) {
 	testAccPreCheck(t)
 

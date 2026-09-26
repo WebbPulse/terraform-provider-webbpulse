@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-framework/action"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -67,32 +66,5 @@ func TestRunRoleDataSourceOnlyReads(t *testing.T) {
 				t.Fatalf("got %d requests, want exactly two reads", calls)
 			}
 		})
-	}
-}
-
-// TestRunRoleActionUsesPost retains explicit write behavior and failure policy.
-func TestRunRoleActionUsesPost(t *testing.T) {
-	for _, fail := range []types.Bool{types.BoolNull(), types.BoolValue(true), types.BoolValue(false)} {
-		ctx := context.Background()
-		calls := 0
-		a := &runRoleCheckAction{client: contractClient(t, func(w http.ResponseWriter, req *http.Request) {
-			calls++
-			if req.Method != http.MethodPost || req.URL.Path != "/api/v1/workspaces/ws-test/run-role/check" {
-				t.Errorf("unexpected action request %s %s", req.Method, req.URL.Path)
-			}
-			_, _ = w.Write([]byte(`{"connected":false,"account_id":null,"error":"Trust policy refused the probe"}`))
-		})}
-		var schema action.SchemaResponse
-		a.Schema(ctx, action.SchemaRequest{}, &schema)
-		config := tfsdk.State{Schema: schema.Schema}
-		if diags := config.Set(ctx, &runRoleCheckActionModel{WorkspaceID: types.StringValue("ws-test"), FailIfNotConnected: fail}); diags.HasError() {
-			t.Fatal(diags)
-		}
-		var resp action.InvokeResponse
-		a.Invoke(ctx, action.InvokeRequest{Config: tfsdk.Config(config)}, &resp)
-		wantError := fail.IsNull() || fail.ValueBool()
-		if calls != 1 || len(resp.Diagnostics) != 1 || resp.Diagnostics.HasError() != wantError {
-			t.Fatalf("unexpected action result: %v", resp.Diagnostics)
-		}
 	}
 }

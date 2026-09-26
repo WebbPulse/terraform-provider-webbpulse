@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-framework/action"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	providerschema "github.com/hashicorp/terraform-plugin-framework/provider/schema"
@@ -12,6 +11,7 @@ import (
 	resourceschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 )
 
+// TestProviderSchemaMarksTheTokenSensitive checks the token is sensitive and both settings are optional.
 func TestProviderSchemaMarksTheTokenSensitive(t *testing.T) {
 	t.Parallel()
 
@@ -42,6 +42,7 @@ func TestProviderSchemaMarksTheTokenSensitive(t *testing.T) {
 	}
 }
 
+// TestProviderSchemaValidates checks the provider schema is a valid implementation.
 func TestProviderSchemaValidates(t *testing.T) {
 	t.Parallel()
 
@@ -53,6 +54,7 @@ func TestProviderSchemaValidates(t *testing.T) {
 	}
 }
 
+// TestResourceSchemasValidate checks every resource schema is a valid implementation.
 func TestResourceSchemasValidate(t *testing.T) {
 	t.Parallel()
 
@@ -77,6 +79,7 @@ func TestResourceSchemasValidate(t *testing.T) {
 	}
 }
 
+// TestDataSourceSchemasValidate checks every data source schema is a valid implementation.
 func TestDataSourceSchemasValidate(t *testing.T) {
 	t.Parallel()
 
@@ -101,31 +104,7 @@ func TestDataSourceSchemasValidate(t *testing.T) {
 	}
 }
 
-func TestActionSchemaValidates(t *testing.T) {
-	t.Parallel()
-
-	a := NewRunRoleCheckAction()
-
-	metadataResp := &action.MetadataResponse{}
-	a.Metadata(context.Background(), action.MetadataRequest{ProviderTypeName: "webbpulse"}, metadataResp)
-	if metadataResp.TypeName != "webbpulse_run_role_check" {
-		t.Errorf("action type name = %q, want webbpulse_run_role_check", metadataResp.TypeName)
-	}
-
-	schemaResp := &action.SchemaResponse{}
-	a.Schema(context.Background(), action.SchemaRequest{}, schemaResp)
-	if schemaResp.Diagnostics.HasError() {
-		t.Fatalf("action schema returned diagnostics: %v", schemaResp.Diagnostics)
-	}
-
-	if _, ok := schemaResp.Schema.Attributes["workspace_id"]; !ok {
-		t.Error("the action takes no workspace_id")
-	}
-	if diags := schemaResp.Schema.ValidateImplementation(context.Background()); diags.HasError() {
-		t.Errorf("the action schema is not a valid implementation: %v", diags)
-	}
-}
-
+// TestResourceTypeNames checks the provider serves exactly the expected resources.
 func TestResourceTypeNames(t *testing.T) {
 	t.Parallel()
 
@@ -153,6 +132,7 @@ func TestResourceTypeNames(t *testing.T) {
 	}
 }
 
+// TestVariableValueIsSensitive checks the variable value is always marked sensitive.
 func TestVariableValueIsSensitive(t *testing.T) {
 	t.Parallel()
 
@@ -168,6 +148,7 @@ func TestVariableValueIsSensitive(t *testing.T) {
 	}
 }
 
+// TestWorkspaceComputedAttributes checks which workspace attributes are computed and required.
 func TestWorkspaceComputedAttributes(t *testing.T) {
 	t.Parallel()
 
@@ -193,6 +174,7 @@ func TestWorkspaceComputedAttributes(t *testing.T) {
 	}
 }
 
+// TestRunRoleCheckDataSourceReturnsItsOutcome checks the run role check exposes its outcome attributes.
 func TestRunRoleCheckDataSourceReturnsItsOutcome(t *testing.T) {
 	t.Parallel()
 

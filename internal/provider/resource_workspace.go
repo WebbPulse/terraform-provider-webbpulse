@@ -8,6 +8,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -51,10 +52,12 @@ func runRoleSetupAttrTypes() map[string]attr.Type {
 	}
 }
 
+// Metadata sets the type name of the workspace resource.
 func (r *workspaceResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_workspace"
 }
 
+// Schema defines the schema of the workspace resource.
 func (r *workspaceResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "One workspace in the control plane. The name is unique across the environment " +
@@ -119,7 +122,8 @@ func (r *workspaceResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				MarkdownDescription: "The account the run role resolved to on its last successful check.",
 			},
 			"run_role_setup": schema.SingleNestedAttribute{
-				Computed: true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.Object{objectplanmodifier.UseStateForUnknown()},
 				MarkdownDescription: "Everything needed to build this workspace's run role. The values are " +
 					"derived from the workspace id, so they are known only once the workspace exists.",
 				Attributes: map[string]schema.Attribute{
@@ -148,10 +152,12 @@ func (r *workspaceResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 	}
 }
 
+// Configure stores the shared API client on the workspace resource.
 func (r *workspaceResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	configureClient(req.ProviderData, &r.client, &resp.Diagnostics)
 }
 
+// Create creates the workspace resource through the API and records the result in state.
 func (r *workspaceResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan workspaceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -185,6 +191,7 @@ func (r *workspaceResource) Create(ctx context.Context, req resource.CreateReque
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
+// Read refreshes the workspace, dropping it from state on a 404.
 func (r *workspaceResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	var state workspaceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
@@ -209,6 +216,7 @@ func (r *workspaceResource) Read(ctx context.Context, req resource.ReadRequest, 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
+// Update sends a merge patch of the changed attributes and records the response in state.
 func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan workspaceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -221,35 +229,16 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 		return
 	}
 
-	engine := plan.Engine.ValueString()
-	engineVersion := plan.EngineVersion.ValueString()
-	workingDirectory := plan.WorkingDirectory.ValueStringPointer()
-	description := plan.Description.ValueStringPointer()
 	body := client.WorkspaceUpdate{
-		Engine:           &engine,
-		EngineVersion:    &engineVersion,
-		WorkingDirectory: &workingDirectory,
-		Description:      &description,
-	}
-	if plan.RunRoleARN.IsUnknown() {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("run_role_arn"),
-			"The run role is unknown",
-			"The run role must be known before updating the workspace.",
-		)
-		return
-	}
-	if !plan.RunRoleARN.Equal(state.RunRoleARN) {
-		arn := plan.RunRoleARN.ValueStringPointer()
-		body.RunRoleARN = &arn
+		Engine:           changedString(plan.Engine, state.Engine),
+		EngineVersion:    changedString(plan.EngineVersion, state.EngineVersion),
+		RunRoleARN:       clearablePatch(plan.RunRoleARN, state.RunRoleARN),
+		WorkingDirectory: clearablePatch(plan.WorkingDirectory, state.WorkingDirectory),
+		Description:      clearablePatch(plan.Description, state.Description),
 	}
 
 	updated, err := r.client.UpdateWorkspace(ctx, state.WorkspaceID.ValueString(), body)
 	if err != nil {
-		if client.IsNotFound(err) {
-			resp.State.RemoveResource(ctx)
-			return
-		}
 		resp.Diagnostics.Append(apiDiagnostic("Cannot update the workspace", err))
 		return
 	}
@@ -262,6 +251,7 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 	resp.Diagnostics.Append(resp.State.Set(ctx, &next)...)
 }
 
+// Delete deletes the workspace resource, treating a 404 as already gone.
 func (r *workspaceResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	var state workspaceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
@@ -277,6 +267,32 @@ func (r *workspaceResource) Delete(ctx context.Context, req resource.DeleteReque
 	}
 }
 
+// ImportState imports a workspace by its id.
 func (r *workspaceResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resource.ImportStatePassthroughID(ctx, path.Root("workspace_id"), req, resp)
+}
+
+// changedString is the merge patch value for a field that cannot be cleared:
+// nil, so the key is omitted, when the plan matches the state.
+func changedString(plan, state types.String) *string {
+	if plan.Equal(state) {
+		return nil
+	}
+	return plan.ValueStringPointer()
+}
+
+// clearablePatch is the merge patch value for a clearable field. It is nil, so
+// the key is omitted, when the plan matches the state, and a pointer to a nil
+// string, which encodes as an explicit JSON null, when the attribute was removed
+// from configuration. A removed working_directory or description plans as its
+// empty default, so an empty string clears too.
+func clearablePatch(plan, state types.String) **string {
+	if plan.Equal(state) {
+		return nil
+	}
+	value := plan.ValueStringPointer()
+	if value != nil && *value == "" {
+		value = nil
+	}
+	return &value
 }

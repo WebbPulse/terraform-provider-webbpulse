@@ -9,6 +9,7 @@ import (
 	"testing"
 )
 
+// TestNormalizeHost checks host normalization adds a scheme and the API prefix.
 func TestNormalizeHost(t *testing.T) {
 	t.Parallel()
 
@@ -20,7 +21,6 @@ func TestNormalizeHost(t *testing.T) {
 		"with scheme":         {"https://example.test", "https://example.test/api/v1"},
 		"with api suffix":     {"https://example.test/api/v1", "https://example.test/api/v1"},
 		"with trailing slash": {"https://example.test/", "https://example.test/api/v1"},
-		"empty falls back":    {"", DefaultHost + "/api/v1"},
 	}
 
 	for name, tc := range cases {
@@ -37,6 +37,7 @@ func TestNormalizeHost(t *testing.T) {
 	}
 }
 
+// TestNewRequiresToken checks a client cannot be built without a token.
 func TestNewRequiresToken(t *testing.T) {
 	t.Parallel()
 
@@ -58,6 +59,7 @@ func newTestClient(t *testing.T, handler http.Handler) *Client {
 	return c
 }
 
+// TestCreateWorkspaceSendsBodyAndAuth checks a create sends its body and the bearer token.
 func TestCreateWorkspaceSendsBodyAndAuth(t *testing.T) {
 	t.Parallel()
 
@@ -109,6 +111,7 @@ func TestCreateWorkspaceSendsBodyAndAuth(t *testing.T) {
 	}
 }
 
+// TestUpdateWorkspaceUsesPatchAndOmitsNilFields checks an update is a PATCH that omits nil fields.
 func TestUpdateWorkspaceUsesPatchAndOmitsNilFields(t *testing.T) {
 	t.Parallel()
 
@@ -139,6 +142,7 @@ func TestUpdateWorkspaceUsesPatchAndOmitsNilFields(t *testing.T) {
 	}
 }
 
+// TestNotFoundIsRecognised checks a 404 is reported as not found.
 func TestNotFoundIsRecognised(t *testing.T) {
 	t.Parallel()
 
@@ -178,65 +182,7 @@ func TestNotFoundIsRecognised(t *testing.T) {
 	}
 }
 
-func TestRunRoleMissingCarriesItsCodeFromDetail(t *testing.T) {
-	t.Parallel()
-
-	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"detail": map[string]any{
-				"message":    "This workspace has no run role ARN yet.",
-				"error_code": RunRoleMissingCode,
-			},
-		})
-	}))
-
-	_, err := c.CheckRunRole(context.Background(), "ws-01J")
-	if err == nil {
-		t.Fatal("CheckRunRole returned no error")
-	}
-	if ErrorCode(err) != RunRoleMissingCode {
-		t.Errorf("ErrorCode = %q, want %s", ErrorCode(err), RunRoleMissingCode)
-	}
-	if IsNotFound(err) {
-		t.Error("IsNotFound = true for a 400, want false")
-	}
-}
-
-func TestCheckRunRoleDecodesAnUnconnectedOutcome(t *testing.T) {
-	t.Parallel()
-
-	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Errorf("method = %q, want POST", r.Method)
-		}
-		if r.URL.Path != "/api/v1/workspaces/ws-01J/run-role/check" {
-			t.Errorf("path = %q, want the run role check route", r.URL.Path)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"connected":  false,
-			"account_id": nil,
-			"error":      "The role does not trust the runner or the external id does not match",
-		})
-	}))
-
-	got, err := c.CheckRunRole(context.Background(), "ws-01J")
-	if err != nil {
-		t.Fatalf("CheckRunRole returned %v", err)
-	}
-	if got.Connected {
-		t.Error("connected = true, want false")
-	}
-	if got.AccountID != nil {
-		t.Errorf("account id = %v, want nil", got.AccountID)
-	}
-	if got.Error == nil {
-		t.Fatal("error = nil, want the reason")
-	}
-}
-
+// TestReadRunRoleCheckUsesTheReadOnlyRoute checks the run role check reads through GET, never POST.
 func TestReadRunRoleCheckUsesTheReadOnlyRoute(t *testing.T) {
 	t.Parallel()
 
@@ -280,6 +226,7 @@ func TestReadRunRoleCheckUsesTheReadOnlyRoute(t *testing.T) {
 	}
 }
 
+// TestReadRunRoleCheckDecodesAnUnconnectedOutcome checks an unconnected outcome decodes as data.
 func TestReadRunRoleCheckDecodesAnUnconnectedOutcome(t *testing.T) {
 	t.Parallel()
 
@@ -310,6 +257,7 @@ func TestReadRunRoleCheckDecodesAnUnconnectedOutcome(t *testing.T) {
 	}
 }
 
+// TestReadRunRoleCheckDecodesAMissingRunRole checks a missing run role surfaces its error code.
 func TestReadRunRoleCheckDecodesAMissingRunRole(t *testing.T) {
 	t.Parallel()
 
@@ -333,6 +281,7 @@ func TestReadRunRoleCheckDecodesAMissingRunRole(t *testing.T) {
 	}
 }
 
+// TestGetVariableWithholdsASensitiveValue checks a sensitive variable decodes with a nil value.
 func TestGetVariableWithholdsASensitiveValue(t *testing.T) {
 	t.Parallel()
 
@@ -360,6 +309,7 @@ func TestGetVariableWithholdsASensitiveValue(t *testing.T) {
 	}
 }
 
+// TestPutVariableEscapesTheKeyInThePath checks a variable key is path escaped.
 func TestPutVariableEscapesTheKeyInThePath(t *testing.T) {
 	t.Parallel()
 
@@ -378,6 +328,7 @@ func TestPutVariableEscapesTheKeyInThePath(t *testing.T) {
 	}
 }
 
+// TestDeleteWorkspaceAcceptsNoContent checks a 204 delete succeeds.
 func TestDeleteWorkspaceAcceptsNoContent(t *testing.T) {
 	t.Parallel()
 
@@ -390,6 +341,7 @@ func TestDeleteWorkspaceAcceptsNoContent(t *testing.T) {
 	}
 }
 
+// TestGetWorkspaceByNameFiltersTheListing checks a name lookup filters the listing.
 func TestGetWorkspaceByNameFiltersTheListing(t *testing.T) {
 	t.Parallel()
 
@@ -414,6 +366,7 @@ func TestGetWorkspaceByNameFiltersTheListing(t *testing.T) {
 	}
 }
 
+// TestContextCancellationSurfaces checks a cancelled context fails the request.
 func TestContextCancellationSurfaces(t *testing.T) {
 	t.Parallel()
 
@@ -430,6 +383,7 @@ func TestContextCancellationSurfaces(t *testing.T) {
 	}
 }
 
+// TestNonJSONErrorBodyStillSurfaces checks a non JSON error body still yields a status error.
 func TestNonJSONErrorBodyStillSurfaces(t *testing.T) {
 	t.Parallel()
 

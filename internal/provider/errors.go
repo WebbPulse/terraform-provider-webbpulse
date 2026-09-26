@@ -14,7 +14,7 @@ func apiDiagnostic(summary string, err error) diag.Diagnostic {
 }
 
 // configureClient pulls the shared API client out of whatever provider data the
-// framework handed a resource, data source or action. Nil provider data is not
+// framework handed a resource or data source. Nil provider data is not
 // an error: the framework calls Configure with nil during validation, before
 // the provider itself has been configured.
 func configureClient(providerData any, target **client.Client, diags *diag.Diagnostics) {

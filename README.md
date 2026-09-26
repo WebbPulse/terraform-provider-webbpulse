@@ -1,7 +1,7 @@
 # terraform-provider-webbpulse
 
 Terraform provider for the WebbPulse Terraform control plane. It manages
-workspaces and their variables, and checks a workspace's run role.
+workspaces and their variables, and reads a workspace's run role check.
 
 Built on the HashiCorp Terraform Plugin Framework v1.19.0, protocol 6.
 
@@ -40,8 +40,8 @@ provider "webbpulse" {
 
 | Attribute | Environment variable | Notes |
 | --- | --- | --- |
-| `host` | `WEBBPULSE_TF_HOST` | Base URL. The `/api/v1` suffix is added when absent. Defaults to staging. |
-| `token` | `WEBBPULSE_TF_TOKEN` | An agent API key, carrying a `wpk_` prefix, sent as a bearer token. Marked sensitive. |
+| `host` | `WEBBPULSE_TF_HOST` | Base URL. The `/api/v1` suffix is added when absent. Required, no default. |
+| `token` | `WEBBPULSE_TF_TOKEN` | A bearer token: an agent API key (`wpk_` prefix) or a user JWT. Marked sensitive. |
 
 Set the token through the environment rather than in a configuration file, so
 it stays out of version control and out of the state file.
@@ -58,9 +58,10 @@ id as its external id, so the role cannot exist until the workspace does. Create
 the workspace, build the role from the computed `run_role_setup`, then set
 `run_role_arn` in a second apply.
 
-Removing `run_role_arn` sends an explicit JSON null in the PATCH request and
-clears the role and its recorded check outcome. Unchanged role fields are omitted.
-This requires the API's JSON Merge Patch support (WebbPulse-Terraform PR64).
+Updates are a JSON Merge Patch that carries only the changed attributes.
+Removing `run_role_arn`, `working_directory` or `description` from the
+configuration sends an explicit JSON null, which clears the field on the API;
+clearing `run_role_arn` also drops the recorded check outcome.
 
 Computed: `workspace_id`, `created_at`, `updated_at`, `run_role_setup`
 (`principal_arn`, `principal_arns`, `external_id`, `role_name`),
@@ -105,46 +106,23 @@ terraform import webbpulse_variable.example ws-01JABCDEF0123456789ABCDEF/region
 
 ## The run role check
 
-The control plane exposes the check on `/workspaces/{id}/run-role/check` in two
-methods, and this provider uses both:
-
-- `GET` performs the AssumeRole and returns the outcome, writing nothing.
-- `POST` performs the same probe and additionally records the outcome on the
-  workspace row, which is what the web UI reads between visits.
-
-The check is a non CRUD operation that returns values, so it is shipped in both
-shapes the Plugin Framework offers, because neither covers the whole need on its
-own:
-
-- The `webbpulse_run_role_check` **data source** is the one to reach for when a
-  configuration needs the outcome as values. An action's `Invoke` hands back
-  only diagnostics and progress messages, so `connected`, `account_id` and
-  `error` cannot reach state through an action at all. It uses `GET`, which
-  probes the current role without changing the workspace. Results can change
-  when the role or its trust policy changes.
-- The `webbpulse_run_role_check` **action** is the one to reach for when a role
-  that does not answer should stop an apply. It reports the outcome as a
-  progress message and raises an error, or a warning when
-  `fail_if_not_connected` is false. Invoking the action uses `POST` and records
-  the outcome the UI shows.
-
-The data source requires both the backend GET handler (WebbPulse-Terraform
-PR63) and its API Gateway route (PR70). It never falls back to POST if GET is
-unavailable. GET needs `workspaces:read`; the action needs `workspaces:write`.
-The GET still performs an STS probe server side; only the workspace write is
-removed. Actions require Terraform 1.14 or later.
+The `webbpulse_run_role_check` data source calls
+`GET /workspaces/{id}/run-role/check`, which performs the AssumeRole and records
+nothing, so a plan or refresh never changes the workspace. It needs the
+`workspaces:read` scope. The `POST` form of the same route, which stamps the
+outcome on the workspace for the web UI, is deliberately not used.
 
 A configured role that does not answer is a 200 with `connected` false, not an
 error: the trust policy may simply not be in place yet. The data source reports
-it as `connected = false` with the reason in `error`, so the problem is visible
-in plan output instead of arriving as a provider error. A workspace with no
-role at all is a 400 carrying `RUN_ROLE_MISSING`, which both shapes surface as
-an error naming `run_role_arn`.
+it as `connected = false` with the reason in `error`. A workspace with no role
+at all is a 400 carrying `RUN_ROLE_MISSING`, which surfaces as an error naming
+`run_role_arn`.
 
 ## Errors
 
-The client keeps the API's own error envelope. A 404 on a read removes the
-resource from state; every other status becomes a diagnostic carrying the API's
+The client keeps the API's own error envelope. A 404 on a resource read removes
+the resource from state, so a workspace or variable deleted outside Terraform is
+planned for re-creation; every other status becomes a diagnostic carrying the API's
 `message`, its `error_code` and the request id, so a failure can be traced back
 to one request in the control plane's logs.
 Unstructured response bodies and validation detail payloads are not copied into
@@ -170,8 +148,8 @@ TF_ACC=1 WEBBPULSE_TF_HOST=... WEBBPULSE_TF_TOKEN=... go test ./... -run TestAcc
 
 ## Backlog
 
-The API does not yet expose everything the provider will want:
-
+- An `hcl` flag on `webbpulse_variable`, once the API ships it
+  (WebbPulse-Terraform PR 67, not merged yet).
 - No runs resource or data source. `POST /workspaces/{id}/config-versions`
   exists, but the runs domain is not wrapped here yet, so a run cannot be
   queued from Terraform.
@@ -180,9 +158,7 @@ The API does not yet expose everything the provider will want:
   side. That is fine at the current scale and will not stay fine.
 - No bulk variable write, so a workspace with many variables makes one request
   per variable.
-- No route returns a sensitive variable's value, so drift on one cannot be
-  detected and it cannot be imported.
 - No ETag or version on a workspace, so an update cannot be made conditional
   and a concurrent edit is last write wins.
 - No registry, so install is a local build plus `dev_overrides`. Publishing and
-  GPG signing are phase 3.
+  GPG signing come later.

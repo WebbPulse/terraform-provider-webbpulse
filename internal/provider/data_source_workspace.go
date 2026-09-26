@@ -21,10 +21,12 @@ type workspaceDataSource struct {
 // NewWorkspaceDataSource returns the webbpulse_workspace data source.
 func NewWorkspaceDataSource() datasource.DataSource { return &workspaceDataSource{} }
 
+// Metadata sets the type name of the workspace data source.
 func (d *workspaceDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_workspace"
 }
 
+// Schema defines the schema of the workspace data source.
 func (d *workspaceDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "One workspace, looked up by id or by name. Exactly one of `workspace_id` and " +
@@ -70,10 +72,12 @@ func (d *workspaceDataSource) Schema(_ context.Context, _ datasource.SchemaReque
 	}
 }
 
+// Configure stores the shared API client on the workspace data source.
 func (d *workspaceDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
 	configureClient(req.ProviderData, &d.client, &resp.Diagnostics)
 }
 
+// Read looks one workspace up by id or by name.
 func (d *workspaceDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
 	var config workspaceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)

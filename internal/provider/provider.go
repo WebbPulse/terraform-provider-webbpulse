@@ -1,5 +1,5 @@
 // Package provider holds the Terraform provider for the WebbPulse Terraform
-// control plane: its schema, its resources, its data sources and its actions.
+// control plane: its schema, its resources and its data sources.
 package provider
 
 import (
@@ -7,8 +7,8 @@ import (
 	"os"
 
 	"github.com/WebbPulse/terraform-provider-webbpulse/internal/client"
-	"github.com/hashicorp/terraform-plugin-framework/action"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -22,7 +22,6 @@ const EnvHost = "WEBBPULSE_TF_HOST"
 const EnvToken = "WEBBPULSE_TF_TOKEN"
 
 var _ provider.Provider = (*webbpulseProvider)(nil)
-var _ provider.ProviderWithActions = (*webbpulseProvider)(nil)
 
 type webbpulseProvider struct {
 	version string
@@ -40,11 +39,13 @@ type providerModel struct {
 	Token types.String `tfsdk:"token"`
 }
 
+// Metadata sets the provider type name and version.
 func (p *webbpulseProvider) Metadata(_ context.Context, _ provider.MetadataRequest, resp *provider.MetadataResponse) {
 	resp.TypeName = "webbpulse"
 	resp.Version = p.version
 }
 
+// Schema defines the schema of the provider.
 func (p *webbpulseProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Manages workspaces and variables in the WebbPulse Terraform control plane.",
@@ -53,18 +54,20 @@ func (p *webbpulseProvider) Schema(_ context.Context, _ provider.SchemaRequest, 
 				Optional: true,
 				MarkdownDescription: "Base URL of the control plane API, such as " +
 					"`https://api.staging.terraform.webbpulse.com`. The `/api/v1` suffix is added when absent. " +
-					"Falls back to the `" + EnvHost + "` environment variable.",
+					"Falls back to the `" + EnvHost + "` environment variable. There is no default, so a " +
+					"configuration always names the environment it manages.",
 			},
 			"token": schema.StringAttribute{
 				Optional:  true,
 				Sensitive: true,
-				MarkdownDescription: "An agent API key, which carries a `wpk_` prefix and is sent as a bearer " +
-					"token. Falls back to the `" + EnvToken + "` environment variable.",
+				MarkdownDescription: "A bearer token: an agent API key, which carries a `wpk_` prefix, or a " +
+					"user JWT. Falls back to the `" + EnvToken + "` environment variable.",
 			},
 		},
 	}
 }
 
+// Configure builds the API client from configuration and environment and hands it to every resource and data source.
 func (p *webbpulseProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
 	var config providerModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
@@ -74,7 +77,7 @@ func (p *webbpulseProvider) Configure(ctx context.Context, req provider.Configur
 
 	if config.Host.IsUnknown() {
 		resp.Diagnostics.AddAttributeError(
-			pathHost(),
+			path.Root("host"),
 			"Host is not known at configure time",
 			"The provider cannot be configured against an unknown host. Set it to a literal value, or "+
 				"supply it through the "+EnvHost+" environment variable.",
@@ -82,7 +85,7 @@ func (p *webbpulseProvider) Configure(ctx context.Context, req provider.Configur
 	}
 	if config.Token.IsUnknown() {
 		resp.Diagnostics.AddAttributeError(
-			pathToken(),
+			path.Root("token"),
 			"Token is not known at configure time",
 			"The provider cannot be configured against an unknown token. Set it to a literal value, or "+
 				"supply it through the "+EnvToken+" environment variable.",
@@ -101,12 +104,21 @@ func (p *webbpulseProvider) Configure(ctx context.Context, req provider.Configur
 		token = config.Token.ValueString()
 	}
 
+	if host == "" {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("host"),
+			"Missing API host",
+			"Set the provider's host attribute or the "+EnvHost+" environment variable to the control plane URL.",
+		)
+	}
 	if token == "" {
 		resp.Diagnostics.AddAttributeError(
-			pathToken(),
+			path.Root("token"),
 			"Missing API token",
-			"Set the provider's token attribute or the "+EnvToken+" environment variable to an agent API key.",
+			"Set the provider's token attribute or the "+EnvToken+" environment variable to an agent API key or a user JWT.",
 		)
+	}
+	if resp.Diagnostics.HasError() {
 		return
 	}
 
@@ -118,9 +130,9 @@ func (p *webbpulseProvider) Configure(ctx context.Context, req provider.Configur
 
 	resp.DataSourceData = apiClient
 	resp.ResourceData = apiClient
-	resp.ActionData = apiClient
 }
 
+// Resources lists the resources the provider serves.
 func (p *webbpulseProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewWorkspaceResource,
@@ -128,16 +140,11 @@ func (p *webbpulseProvider) Resources(_ context.Context) []func() resource.Resou
 	}
 }
 
+// DataSources lists the data sources the provider serves.
 func (p *webbpulseProvider) DataSources(_ context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
 		NewWorkspaceDataSource,
 		NewWorkspacesDataSource,
 		NewRunRoleCheckDataSource,
-	}
-}
-
-func (p *webbpulseProvider) Actions(_ context.Context) []func() action.Action {
-	return []func() action.Action{
-		NewRunRoleCheckAction,
 	}
 }

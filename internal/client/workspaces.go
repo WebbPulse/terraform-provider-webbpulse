@@ -59,8 +59,9 @@ func (c *Client) GetWorkspaceByName(ctx context.Context, name string) (*Workspac
 	}
 }
 
-// UpdateWorkspace edits one workspace. The API takes a PATCH, and every nil
-// field on the body is left untouched.
+// UpdateWorkspace edits one workspace with a JSON Merge Patch: a nil field is
+// omitted and left untouched, and a pointer to a nil string sends an explicit
+// null, which clears one of the clearable fields.
 func (c *Client) UpdateWorkspace(ctx context.Context, workspaceID string, body WorkspaceUpdate) (*Workspace, error) {
 	var out Workspace
 	if err := c.do(ctx, http.MethodPatch, workspacePath(workspaceID), body, &out); err != nil {
@@ -82,19 +83,6 @@ func (c *Client) DeleteWorkspace(ctx context.Context, workspaceID string) error 
 func (c *Client) ReadRunRoleCheck(ctx context.Context, workspaceID string) (*RunRoleCheck, error) {
 	var out RunRoleCheck
 	if err := c.do(ctx, http.MethodGet, runRoleCheckPath(workspaceID), nil, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// CheckRunRole assumes the workspace's run role and records the outcome on the
-// workspace row, which is what the web UI shows between visits. Use
-// ReadRunRoleCheck when only the answer is wanted. A configured role that does
-// not answer is still a 200 with Connected false; a workspace with no role at
-// all is a 400 carrying RunRoleMissingCode.
-func (c *Client) CheckRunRole(ctx context.Context, workspaceID string) (*RunRoleCheck, error) {
-	var out RunRoleCheck
-	if err := c.do(ctx, http.MethodPost, runRoleCheckPath(workspaceID), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

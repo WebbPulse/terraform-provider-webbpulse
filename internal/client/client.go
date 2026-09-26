@@ -16,9 +16,6 @@ import (
 	"time"
 )
 
-// DefaultHost is the staging control plane, used when no host is configured.
-const DefaultHost = "https://api.staging.terraform.webbpulse.com"
-
 // APIPath is the version prefix every route in this client sits under.
 const APIPath = "/api/v1"
 
@@ -75,7 +72,7 @@ func (c *Client) BaseURL() string { return c.baseURL }
 func normalizeHost(host string) (string, error) {
 	trimmed := strings.TrimSpace(host)
 	if trimmed == "" {
-		trimmed = DefaultHost
+		return "", errors.New("a host is required")
 	}
 	if !strings.Contains(trimmed, "://") {
 		trimmed = "https://" + trimmed
