@@ -21,6 +21,49 @@ type workspaceDataSource struct {
 // NewWorkspaceDataSource returns the webbpulse_workspace data source.
 func NewWorkspaceDataSource() datasource.DataSource { return &workspaceDataSource{} }
 
+// workspaceDataModel is the workspace resource model without the resource
+// only force_delete, which the data source schema does not carry.
+type workspaceDataModel struct {
+	WorkspaceID         types.String `tfsdk:"workspace_id"`
+	Name                types.String `tfsdk:"name"`
+	Engine              types.String `tfsdk:"engine"`
+	EngineVersion       types.String `tfsdk:"engine_version"`
+	RunRoleARN          types.String `tfsdk:"run_role_arn"`
+	WorkingDirectory    types.String `tfsdk:"working_directory"`
+	Description         types.String `tfsdk:"description"`
+	CreatedAt           types.String `tfsdk:"created_at"`
+	UpdatedAt           types.String `tfsdk:"updated_at"`
+	RunRoleSetup        types.Object `tfsdk:"run_role_setup"`
+	RunRoleCheckedAt    types.String `tfsdk:"run_role_checked_at"`
+	RunRoleAccountID    types.String `tfsdk:"run_role_account_id"`
+	VCSRepo             types.Object `tfsdk:"vcs_repo"`
+	TriggerPatterns     types.List   `tfsdk:"trigger_patterns"`
+	FileTriggersEnabled types.Bool   `tfsdk:"file_triggers_enabled"`
+	SpeculativeEnabled  types.Bool   `tfsdk:"speculative_enabled"`
+}
+
+// workspaceDataFrom narrows a resource model to the data source model.
+func workspaceDataFrom(m workspaceModel) *workspaceDataModel {
+	return &workspaceDataModel{
+		WorkspaceID:         m.WorkspaceID,
+		Name:                m.Name,
+		Engine:              m.Engine,
+		EngineVersion:       m.EngineVersion,
+		RunRoleARN:          m.RunRoleARN,
+		WorkingDirectory:    m.WorkingDirectory,
+		Description:         m.Description,
+		CreatedAt:           m.CreatedAt,
+		UpdatedAt:           m.UpdatedAt,
+		RunRoleSetup:        m.RunRoleSetup,
+		RunRoleCheckedAt:    m.RunRoleCheckedAt,
+		RunRoleAccountID:    m.RunRoleAccountID,
+		VCSRepo:             m.VCSRepo,
+		TriggerPatterns:     m.TriggerPatterns,
+		FileTriggersEnabled: m.FileTriggersEnabled,
+		SpeculativeEnabled:  m.SpeculativeEnabled,
+	}
+}
+
 // Metadata sets the type name of the workspace data source.
 func (d *workspaceDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_workspace"
@@ -58,6 +101,29 @@ func (d *workspaceDataSource) Schema(_ context.Context, _ datasource.SchemaReque
 				Computed:            true,
 				MarkdownDescription: "The account the run role resolved to on its last successful check.",
 			},
+			"trigger_patterns": schema.ListAttribute{
+				Computed:            true,
+				ElementType:         types.StringType,
+				MarkdownDescription: "Glob patterns over repository paths that decide whether an upload starts a run.",
+			},
+			"file_triggers_enabled": schema.BoolAttribute{
+				Computed:            true,
+				MarkdownDescription: "Whether uploads are filtered by changed paths.",
+			},
+			"speculative_enabled": schema.BoolAttribute{
+				Computed:            true,
+				MarkdownDescription: "Whether a pull request upload starts a plan only run.",
+			},
+			"vcs_repo": schema.SingleNestedAttribute{
+				Computed:            true,
+				MarkdownDescription: "The connected GitHub repository, or null when none is connected.",
+				Attributes: map[string]schema.Attribute{
+					"identifier":      schema.StringAttribute{Computed: true, MarkdownDescription: "The repository as `owner/name`."},
+					"branch":          schema.StringAttribute{Computed: true, MarkdownDescription: "The branch whose pushes start runs."},
+					"repository_id":   schema.StringAttribute{Computed: true, MarkdownDescription: "GitHub's id for the repository."},
+					"installation_id": schema.StringAttribute{Computed: true, MarkdownDescription: "The GitHub App installation that covered the repository."},
+				},
+			},
 			"run_role_setup": schema.SingleNestedAttribute{
 				Computed:            true,
 				MarkdownDescription: "Everything needed to build this workspace's run role.",
@@ -79,7 +145,7 @@ func (d *workspaceDataSource) Configure(_ context.Context, req datasource.Config
 
 // Read looks one workspace up by id or by name.
 func (d *workspaceDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
-	var config workspaceModel
+	var config workspaceDataModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -114,5 +180,5 @@ func (d *workspaceDataSource) Read(ctx context.Context, req datasource.ReadReque
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+	resp.Diagnostics.Append(resp.State.Set(ctx, workspaceDataFrom(state))...)
 }

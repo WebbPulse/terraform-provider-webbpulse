@@ -9,12 +9,18 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// applyWorkspace copies one API workspace onto a state model.
+// applyWorkspace copies one API workspace onto a state model. The model's
+// vcs_repo going in is the prior value, whose identifier spelling is kept when
+// the API names the same repository.
 func applyWorkspace(ctx context.Context, from *client.Workspace, into *workspaceModel) diag.Diagnostics {
 	var diags diag.Diagnostics
 
 	setup, setupDiags := runRoleSetupObject(ctx, from.RunRoleSetup)
 	diags.Append(setupDiags...)
+	vcsRepo, vcsDiags := vcsRepoObject(ctx, from, into.VCSRepo)
+	diags.Append(vcsDiags...)
+	patterns, patternDiags := triggerPatternsList(ctx, from.TriggerPatterns)
+	diags.Append(patternDiags...)
 	if diags.HasError() {
 		return diags
 	}
@@ -31,6 +37,10 @@ func applyWorkspace(ctx context.Context, from *client.Workspace, into *workspace
 	into.RunRoleSetup = setup
 	into.RunRoleCheckedAt = optionalString(from.RunRoleCheckedAt)
 	into.RunRoleAccountID = optionalString(from.RunRoleAccountID)
+	into.VCSRepo = vcsRepo
+	into.TriggerPatterns = patterns
+	into.FileTriggersEnabled = boolOrTrue(from.FileTriggersEnabled)
+	into.SpeculativeEnabled = boolOrTrue(from.SpeculativePlans)
 	return diags
 }
 

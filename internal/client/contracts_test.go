@@ -13,6 +13,7 @@ func TestWorkspacePatchNullableFields(t *testing.T) {
 	var cleared *string
 	value := "configured"
 	assigned := &value
+	off := false
 	for _, tc := range []struct {
 		name string
 		body WorkspaceUpdate
@@ -21,6 +22,8 @@ func TestWorkspacePatchNullableFields(t *testing.T) {
 		{"omitted", WorkspaceUpdate{}, `{}`},
 		{"cleared", WorkspaceUpdate{RunRoleARN: &cleared, WorkingDirectory: &cleared, Description: &cleared}, `{"run_role_arn":null,"working_directory":null,"description":null}`},
 		{"assigned", WorkspaceUpdate{RunRoleARN: &assigned, WorkingDirectory: &assigned, Description: &assigned}, `{"run_role_arn":"configured","working_directory":"configured","description":"configured"}`},
+		{"vcs disconnected", WorkspaceUpdate{VCSRepo: &cleared, TrackedBranch: &cleared}, `{"vcs_repo":null,"tracked_branch":null}`},
+		{"vcs settings", WorkspaceUpdate{VCSRepo: &assigned, TriggerPatterns: &[]string{}, SpeculativePlans: &off, FileTriggersEnabled: &off}, `{"vcs_repo":"configured","trigger_patterns":[],"speculative_plans":false,"file_triggers_enabled":false}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

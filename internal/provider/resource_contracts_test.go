@@ -29,6 +29,9 @@ func contractClient(t *testing.T, handler http.HandlerFunc) *client.Client {
 // resourceState encodes a model using the resource's real Terraform schema.
 func resourceState(t *testing.T, r resource.Resource, model any) tfsdk.State {
 	t.Helper()
+	if ws, ok := model.(*workspaceModel); ok {
+		fillWorkspaceNulls(ws)
+	}
 	var schema resource.SchemaResponse
 	r.Schema(context.Background(), resource.SchemaRequest{}, &schema)
 	state := tfsdk.State{Schema: schema.Schema}
@@ -36,6 +39,21 @@ func resourceState(t *testing.T, r resource.Resource, model any) tfsdk.State {
 		t.Fatal(diags)
 	}
 	return state
+}
+
+// fillWorkspaceNulls gives every untyped zero object and list in a workspace
+// model its typed null, so a fixture need only set the fields it tests.
+func fillWorkspaceNulls(m *workspaceModel) {
+	ctx := context.Background()
+	if len(m.RunRoleSetup.AttributeTypes(ctx)) == 0 {
+		m.RunRoleSetup = types.ObjectNull(runRoleSetupAttrTypes())
+	}
+	if len(m.VCSRepo.AttributeTypes(ctx)) == 0 {
+		m.VCSRepo = types.ObjectNull(vcsRepoAttrTypes())
+	}
+	if m.TriggerPatterns.ElementType(ctx) == nil {
+		m.TriggerPatterns = types.ListNull(types.StringType)
+	}
 }
 
 // TestWorkspaceUpdateMergePatch checks the PATCH body carries only changed

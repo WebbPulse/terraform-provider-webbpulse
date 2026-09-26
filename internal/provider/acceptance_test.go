@@ -3,6 +3,7 @@ package provider
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"testing"
 	"time"
 
@@ -230,6 +231,126 @@ data "webbpulse_workspace" "by_name" {
 						"data.webbpulse_workspace.by_id", "workspace_id",
 						"webbpulse_workspace.test", "workspace_id",
 					),
+				),
+			},
+		},
+	})
+}
+
+// EnvAccVCSRepo names a GitHub owner/name the target environment's GitHub App
+// is installed on. The VCS acceptance test skips without it, since connecting a
+// repository needs an App installation the test cannot create.
+const EnvAccVCSRepo = "WEBBPULSE_TF_ACC_VCS_REPO"
+
+// TestAccWorkspaceTriggerSettings sets and clears the trigger settings against a live API.
+func TestAccWorkspaceTriggerSettings(t *testing.T) {
+	testAccPreCheck(t)
+
+	name := testAccName("triggers")
+	const address = "webbpulse_workspace.test"
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: fmt.Sprintf(`
+resource "webbpulse_workspace" "test" {
+  name                  = %q
+  engine_version        = "1.9.8"
+  working_directory     = "infra"
+  trigger_patterns      = ["/modules/**", "*.tf"]
+  file_triggers_enabled = false
+  speculative_enabled   = false
+}
+`, name),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(address, "trigger_patterns.#", "2"),
+					resource.TestCheckResourceAttr(address, "file_triggers_enabled", "false"),
+					resource.TestCheckResourceAttr(address, "speculative_enabled", "false"),
+					resource.TestCheckNoResourceAttr(address, "vcs_repo.identifier"),
+				),
+			},
+			{
+				Config: fmt.Sprintf(`
+resource "webbpulse_workspace" "test" {
+  name           = %q
+  engine_version = "1.9.8"
+}
+`, name),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(address, "trigger_patterns.#", "0"),
+					resource.TestCheckResourceAttr(address, "file_triggers_enabled", "true"),
+					resource.TestCheckResourceAttr(address, "speculative_enabled", "true"),
+				),
+			},
+		},
+	})
+}
+
+// TestAccWorkspaceVCS connects, retargets and disconnects a repository against
+// a live API, and checks a repository the App cannot see is refused.
+func TestAccWorkspaceVCS(t *testing.T) {
+	testAccPreCheck(t)
+	repo := os.Getenv(EnvAccVCSRepo)
+	if repo == "" {
+		t.Skipf("the VCS acceptance test needs %s, a repository the environment's GitHub App is installed on", EnvAccVCSRepo)
+	}
+
+	name := testAccName("vcs")
+	const address = "webbpulse_workspace.test"
+	config := func(block string) string {
+		return fmt.Sprintf(`
+resource "webbpulse_workspace" "test" {
+  name           = %q
+  engine_version = "1.9.8"
+%s
+}
+
+data "webbpulse_workspace" "test" {
+  workspace_id = webbpulse_workspace.test.workspace_id
+}
+`, name, block)
+	}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config(fmt.Sprintf(`
+  vcs_repo {
+    identifier = %q
+  }
+`, repo)),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(address, "vcs_repo.identifier", repo),
+					resource.TestCheckResourceAttrSet(address, "vcs_repo.branch"),
+					resource.TestCheckResourceAttrSet(address, "vcs_repo.repository_id"),
+					resource.TestCheckResourceAttrSet(address, "vcs_repo.installation_id"),
+					resource.TestCheckResourceAttrPair("data.webbpulse_workspace.test", "vcs_repo.branch", address, "vcs_repo.branch"),
+				),
+			},
+			{
+				Config: config(fmt.Sprintf(`
+  vcs_repo {
+    identifier = %q
+    branch     = "tfacc-branch"
+  }
+`, repo)),
+				Check: resource.TestCheckResourceAttr(address, "vcs_repo.branch", "tfacc-branch"),
+			},
+			{
+				Config: config(fmt.Sprintf(`
+  vcs_repo {
+    identifier = %q
+  }
+`, "WebbPulse/tfacc-not-installed-"+name)),
+				ExpectError: regexp.MustCompile(`VCS_REPO_NOT_INSTALLED`),
+			},
+			{
+				Config: config(""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckNoResourceAttr(address, "vcs_repo.identifier"),
+					resource.TestCheckNoResourceAttr("data.webbpulse_workspace.test", "vcs_repo.identifier"),
 				),
 			},
 		},

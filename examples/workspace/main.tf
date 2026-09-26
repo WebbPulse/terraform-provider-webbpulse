@@ -17,6 +17,14 @@ resource "webbpulse_workspace" "example" {
   working_directory = "infra"
   description       = "Managed by the webbpulse provider"
   force_delete      = false
+
+  trigger_patterns      = ["/modules/**/*.tf"]
+  file_triggers_enabled = true
+  speculative_enabled   = true
+
+  vcs_repo {
+    identifier = var.vcs_repo
+  }
 }
 
 resource "webbpulse_variable" "region" {
@@ -38,4 +46,9 @@ resource "webbpulse_variable" "api_token" {
 output "run_role_setup" {
   value       = webbpulse_workspace.example.run_role_setup
   description = "Build the run role from these values, then set run_role_arn on the workspace."
+}
+
+output "vcs_branch" {
+  value       = webbpulse_workspace.example.vcs_repo.branch
+  description = "The tracked branch, the repository's default branch unless set."
 }

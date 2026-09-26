@@ -8,39 +8,58 @@ type RunRoleSetup struct {
 	RoleName      string   `json:"role_name"`
 }
 
-// Workspace is a stored workspace as the API renders it.
+// Workspace is a stored workspace as the API renders it. SpeculativePlans and
+// FileTriggersEnabled are nil from an API that predates them, which a caller
+// reads as their default of true.
 type Workspace struct {
-	WorkspaceID      string       `json:"workspace_id"`
-	Name             string       `json:"name"`
-	Engine           string       `json:"engine"`
-	EngineVersion    string       `json:"engine_version"`
-	RunRoleARN       *string      `json:"run_role_arn"`
-	WorkingDirectory string       `json:"working_directory"`
-	Description      string       `json:"description"`
-	CreatedAt        string       `json:"created_at"`
-	UpdatedAt        *string      `json:"updated_at"`
-	RunRoleSetup     RunRoleSetup `json:"run_role_setup"`
-	RunRoleCheckedAt *string      `json:"run_role_checked_at"`
-	RunRoleAccountID *string      `json:"run_role_account_id"`
+	WorkspaceID         string       `json:"workspace_id"`
+	Name                string       `json:"name"`
+	Engine              string       `json:"engine"`
+	EngineVersion       string       `json:"engine_version"`
+	RunRoleARN          *string      `json:"run_role_arn"`
+	WorkingDirectory    string       `json:"working_directory"`
+	Description         string       `json:"description"`
+	CreatedAt           string       `json:"created_at"`
+	UpdatedAt           *string      `json:"updated_at"`
+	RunRoleSetup        RunRoleSetup `json:"run_role_setup"`
+	RunRoleCheckedAt    *string      `json:"run_role_checked_at"`
+	RunRoleAccountID    *string      `json:"run_role_account_id"`
+	VCSRepo             *string      `json:"vcs_repo"`
+	TrackedBranch       *string      `json:"tracked_branch"`
+	TriggerPatterns     []string     `json:"trigger_patterns"`
+	SpeculativePlans    *bool        `json:"speculative_plans"`
+	FileTriggersEnabled *bool        `json:"file_triggers_enabled"`
+	VCSRepositoryID     *string      `json:"vcs_repository_id"`
+	VCSInstallationID   *string      `json:"vcs_installation_id"`
 }
 
 // WorkspaceCreate is the body of a workspace create.
 type WorkspaceCreate struct {
-	Name             string  `json:"name"`
-	Engine           string  `json:"engine,omitempty"`
-	EngineVersion    string  `json:"engine_version"`
-	RunRoleARN       *string `json:"run_role_arn,omitempty"`
-	WorkingDirectory string  `json:"working_directory,omitempty"`
-	Description      string  `json:"description,omitempty"`
+	Name                string   `json:"name"`
+	Engine              string   `json:"engine,omitempty"`
+	EngineVersion       string   `json:"engine_version"`
+	RunRoleARN          *string  `json:"run_role_arn,omitempty"`
+	WorkingDirectory    string   `json:"working_directory,omitempty"`
+	Description         string   `json:"description,omitempty"`
+	VCSRepo             *string  `json:"vcs_repo,omitempty"`
+	TrackedBranch       *string  `json:"tracked_branch,omitempty"`
+	TriggerPatterns     []string `json:"trigger_patterns,omitempty"`
+	SpeculativePlans    *bool    `json:"speculative_plans,omitempty"`
+	FileTriggersEnabled *bool    `json:"file_triggers_enabled,omitempty"`
 }
 
 // WorkspaceUpdate omits nil fields; a pointer to a nil string clears a nullable field.
 type WorkspaceUpdate struct {
-	Engine           *string  `json:"engine,omitempty"`
-	EngineVersion    *string  `json:"engine_version,omitempty"`
-	RunRoleARN       **string `json:"run_role_arn,omitempty"`
-	WorkingDirectory **string `json:"working_directory,omitempty"`
-	Description      **string `json:"description,omitempty"`
+	Engine              *string   `json:"engine,omitempty"`
+	EngineVersion       *string   `json:"engine_version,omitempty"`
+	RunRoleARN          **string  `json:"run_role_arn,omitempty"`
+	WorkingDirectory    **string  `json:"working_directory,omitempty"`
+	Description         **string  `json:"description,omitempty"`
+	VCSRepo             **string  `json:"vcs_repo,omitempty"`
+	TrackedBranch       **string  `json:"tracked_branch,omitempty"`
+	TriggerPatterns     *[]string `json:"trigger_patterns,omitempty"`
+	SpeculativePlans    *bool     `json:"speculative_plans,omitempty"`
+	FileTriggersEnabled *bool     `json:"file_triggers_enabled,omitempty"`
 }
 
 // WorkspaceList is the envelope every workspace listing returns.
