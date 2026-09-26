@@ -19,6 +19,15 @@ const WorkspaceManagesResourcesCode = "WORKSPACE_MANAGES_RESOURCES"
 // run on the workspace has not finished. A forced delete does not skip it.
 const WorkspaceHasActiveRunCode = "WORKSPACE_HAS_ACTIVE_RUN"
 
+// VCSRepoNotInstalledCode is the stable code a 422 on a workspace create or
+// update carries when the environment's GitHub App cannot see the repository
+// named in vcs_repo.
+const VCSRepoNotInstalledCode = "VCS_REPO_NOT_INSTALLED"
+
+// GitHubUnavailableCode is the stable code a 502 or 503 carries when GitHub
+// could not resolve the repository named in vcs_repo.
+const GitHubUnavailableCode = "GITHUB_UNAVAILABLE"
+
 // CreateWorkspace creates a workspace and returns it. The run role is optional
 // here because the role's trust policy names the workspace id as its external
 // id, so the role cannot exist until the workspace does.

@@ -4,16 +4,23 @@ import (
 	"context"
 
 	"github.com/WebbPulse/terraform-provider-webbpulse/internal/client"
+	"regexp"
+
+	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/objectvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -31,19 +38,23 @@ type workspaceResource struct {
 func NewWorkspaceResource() resource.Resource { return &workspaceResource{} }
 
 type workspaceModel struct {
-	WorkspaceID      types.String `tfsdk:"workspace_id"`
-	Name             types.String `tfsdk:"name"`
-	Engine           types.String `tfsdk:"engine"`
-	EngineVersion    types.String `tfsdk:"engine_version"`
-	RunRoleARN       types.String `tfsdk:"run_role_arn"`
-	WorkingDirectory types.String `tfsdk:"working_directory"`
-	Description      types.String `tfsdk:"description"`
-	CreatedAt        types.String `tfsdk:"created_at"`
-	UpdatedAt        types.String `tfsdk:"updated_at"`
-	RunRoleSetup     types.Object `tfsdk:"run_role_setup"`
-	RunRoleCheckedAt types.String `tfsdk:"run_role_checked_at"`
-	RunRoleAccountID types.String `tfsdk:"run_role_account_id"`
-	ForceDelete      types.Bool   `tfsdk:"force_delete"`
+	WorkspaceID         types.String `tfsdk:"workspace_id"`
+	Name                types.String `tfsdk:"name"`
+	Engine              types.String `tfsdk:"engine"`
+	EngineVersion       types.String `tfsdk:"engine_version"`
+	RunRoleARN          types.String `tfsdk:"run_role_arn"`
+	WorkingDirectory    types.String `tfsdk:"working_directory"`
+	Description         types.String `tfsdk:"description"`
+	CreatedAt           types.String `tfsdk:"created_at"`
+	UpdatedAt           types.String `tfsdk:"updated_at"`
+	RunRoleSetup        types.Object `tfsdk:"run_role_setup"`
+	RunRoleCheckedAt    types.String `tfsdk:"run_role_checked_at"`
+	RunRoleAccountID    types.String `tfsdk:"run_role_account_id"`
+	ForceDelete         types.Bool   `tfsdk:"force_delete"`
+	VCSRepo             types.Object `tfsdk:"vcs_repo"`
+	TriggerPatterns     types.List   `tfsdk:"trigger_patterns"`
+	FileTriggersEnabled types.Bool   `tfsdk:"file_triggers_enabled"`
+	SpeculativeEnabled  types.Bool   `tfsdk:"speculative_enabled"`
 }
 
 func runRoleSetupAttrTypes() map[string]attr.Type {
@@ -95,10 +106,44 @@ func (r *workspaceResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 					"sends an explicit null and clears the role and its recorded check outcome.",
 			},
 			"working_directory": schema.StringAttribute{
-				Optional:            true,
-				Computed:            true,
-				Default:             stringdefault.StaticString(""),
-				MarkdownDescription: "The directory inside the configuration the engine runs in.",
+				Optional: true,
+				Computed: true,
+				Default:  stringdefault.StaticString(""),
+				MarkdownDescription: "The directory inside the configuration the engine runs in, relative " +
+					"to the repository root when `vcs_repo` is set. Changed paths outside it do not trigger runs " +
+					"unless `trigger_patterns` names them.",
+			},
+			"trigger_patterns": schema.ListAttribute{
+				Optional:    true,
+				Computed:    true,
+				ElementType: types.StringType,
+				Default:     listdefault.StaticValue(types.ListValueMust(types.StringType, []attr.Value{})),
+				MarkdownDescription: "Glob patterns over repository paths, such as `/modules/**/*.tf`. An upload " +
+					"from `vcs_repo` starts a run only when a changed path matches one. Empty, the default, " +
+					"means every change under `working_directory`. Ignored while `file_triggers_enabled` is `false`.",
+				Validators: []validator.List{
+					listvalidator.SizeAtMost(50),
+					listvalidator.UniqueValues(),
+					listvalidator.ValueStringsAre(
+						stringvalidator.LengthBetween(1, 255),
+						stringvalidator.RegexMatches(regexp.MustCompile(`^\S(.*\S)?$`), "must not start or end with whitespace"),
+					),
+				},
+			},
+			"file_triggers_enabled": schema.BoolAttribute{
+				Optional: true,
+				Computed: true,
+				Default:  booldefault.StaticBool(true),
+				MarkdownDescription: "Whether uploads are filtered by changed paths against `working_directory` " +
+					"and `trigger_patterns`. `false` starts a run for every push to the tracked branch. Defaults " +
+					"to `true`.",
+			},
+			"speculative_enabled": schema.BoolAttribute{
+				Optional: true,
+				Computed: true,
+				Default:  booldefault.StaticBool(true),
+				MarkdownDescription: "Whether a pull request upload starts a plan only run. Sent to the API as " +
+					"`speculative_plans`. Defaults to `true`.",
 			},
 			"description": schema.StringAttribute{
 				Optional:            true,
@@ -162,6 +207,44 @@ func (r *workspaceResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				},
 			},
 		},
+		Blocks: map[string]schema.Block{
+			"vcs_repo": schema.SingleNestedBlock{
+				MarkdownDescription: "Connects the workspace to a GitHub repository through the environment's " +
+					"GitHub App, so pushes to `branch` start runs and pull requests start plan only runs. " +
+					"Removing the block disconnects the repository.",
+				Attributes: map[string]schema.Attribute{
+					"identifier": schema.StringAttribute{
+						Optional: true,
+						MarkdownDescription: "The repository as `owner/name`. Required when the block is set. " +
+							"The App has to be installed on it, or the apply fails with `VCS_REPO_NOT_INSTALLED`.",
+						Validators: []validator.String{
+							stringvalidator.LengthAtMost(140),
+							stringvalidator.RegexMatches(regexp.MustCompile(vcsRepoPattern), "must be a GitHub owner/name"),
+						},
+					},
+					"branch": schema.StringAttribute{
+						Optional: true,
+						Computed: true,
+						MarkdownDescription: "The branch whose pushes start runs. Defaults to the repository's " +
+							"default branch, which the API resolves when the repository is connected.",
+						Validators:    []validator.String{stringvalidator.LengthBetween(1, 255)},
+						PlanModifiers: []planmodifier.String{sameRepositoryModifier{}},
+					},
+					"repository_id": schema.StringAttribute{
+						Computed: true,
+						MarkdownDescription: "GitHub's id for the repository, which keeps the connection " +
+							"through a rename. Null until resolved.",
+						PlanModifiers: []planmodifier.String{sameRepositoryModifier{}},
+					},
+					"installation_id": schema.StringAttribute{
+						Computed:            true,
+						MarkdownDescription: "The GitHub App installation that covered the repository when it was connected.",
+						PlanModifiers:       []planmodifier.String{sameRepositoryModifier{}},
+					},
+				},
+				Validators: []validator.Object{objectvalidator.AlsoRequires(path.MatchRelative().AtName("identifier"))},
+			},
+		},
 	}
 }
 
@@ -189,14 +272,30 @@ func (r *workspaceResource) Create(ctx context.Context, req resource.CreateReque
 		arn := plan.RunRoleARN.ValueString()
 		body.RunRoleARN = &arn
 	}
+	repo, branch, vcsDiags := vcsPatch(ctx, plan.VCSRepo, types.ObjectNull(vcsRepoAttrTypes()))
+	resp.Diagnostics.Append(vcsDiags...)
+	patterns, patternDiags := listStrings(ctx, plan.TriggerPatterns)
+	resp.Diagnostics.Append(patternDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if repo != nil {
+		body.VCSRepo = *repo
+	}
+	if branch != nil {
+		body.TrackedBranch = *branch
+	}
+	body.TriggerPatterns = patterns
+	body.FileTriggersEnabled = plan.FileTriggersEnabled.ValueBoolPointer()
+	body.SpeculativePlans = plan.SpeculativeEnabled.ValueBoolPointer()
 
 	created, err := r.client.CreateWorkspace(ctx, body)
 	if err != nil {
-		resp.Diagnostics.Append(apiDiagnostic("Cannot create the workspace", err))
+		resp.Diagnostics.Append(workspaceWriteDiagnostic("Cannot create the workspace", err))
 		return
 	}
 
-	state := workspaceModel{ForceDelete: plan.ForceDelete}
+	state := workspaceModel{ForceDelete: plan.ForceDelete, VCSRepo: plan.VCSRepo}
 	resp.Diagnostics.Append(applyWorkspace(ctx, created, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -246,20 +345,36 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 	}
 
 	body := client.WorkspaceUpdate{
-		Engine:           changedString(plan.Engine, state.Engine),
-		EngineVersion:    changedString(plan.EngineVersion, state.EngineVersion),
-		RunRoleARN:       clearablePatch(plan.RunRoleARN, state.RunRoleARN),
-		WorkingDirectory: clearablePatch(plan.WorkingDirectory, state.WorkingDirectory),
-		Description:      clearablePatch(plan.Description, state.Description),
+		Engine:              changedString(plan.Engine, state.Engine),
+		EngineVersion:       changedString(plan.EngineVersion, state.EngineVersion),
+		RunRoleARN:          clearablePatch(plan.RunRoleARN, state.RunRoleARN),
+		WorkingDirectory:    clearablePatch(plan.WorkingDirectory, state.WorkingDirectory),
+		Description:         clearablePatch(plan.Description, state.Description),
+		FileTriggersEnabled: changedBool(plan.FileTriggersEnabled, state.FileTriggersEnabled),
+		SpeculativePlans:    changedBool(plan.SpeculativeEnabled, state.SpeculativeEnabled),
+	}
+	var vcsDiags diag.Diagnostics
+	body.VCSRepo, body.TrackedBranch, vcsDiags = vcsPatch(ctx, plan.VCSRepo, state.VCSRepo)
+	resp.Diagnostics.Append(vcsDiags...)
+	if !plan.TriggerPatterns.IsUnknown() && !plan.TriggerPatterns.Equal(state.TriggerPatterns) {
+		patterns, patternDiags := listStrings(ctx, plan.TriggerPatterns)
+		resp.Diagnostics.Append(patternDiags...)
+		if patterns == nil {
+			patterns = []string{}
+		}
+		body.TriggerPatterns = &patterns
+	}
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
 	updated, err := r.client.UpdateWorkspace(ctx, state.WorkspaceID.ValueString(), body)
 	if err != nil {
-		resp.Diagnostics.Append(apiDiagnostic("Cannot update the workspace", err))
+		resp.Diagnostics.Append(workspaceWriteDiagnostic("Cannot update the workspace", err))
 		return
 	}
 
-	next := workspaceModel{ForceDelete: plan.ForceDelete}
+	next := workspaceModel{ForceDelete: plan.ForceDelete, VCSRepo: plan.VCSRepo}
 	resp.Diagnostics.Append(applyWorkspace(ctx, updated, &next)...)
 	if resp.Diagnostics.HasError() {
 		return

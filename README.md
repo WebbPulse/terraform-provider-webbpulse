@@ -74,7 +74,9 @@ that check: a workspace with an unfinished run is refused with
 `WORKSPACE_HAS_ACTIVE_RUN` either way. Both refusals surface as diagnostics
 naming the code.
 
-Optional: `force_delete` (default `false`).
+Optional: `force_delete` (default `false`), `trigger_patterns` (default `[]`),
+`file_triggers_enabled` (default `true`), `speculative_enabled` (default
+`true`), and the `vcs_repo` block.
 
 Computed: `workspace_id`, `created_at`, `updated_at`, `run_role_setup`
 (`principal_arn`, `principal_arns`, `external_id`, `role_name`),
@@ -83,6 +85,55 @@ Computed: `workspace_id`, `created_at`, `updated_at`, `run_role_setup`
 ```sh
 terraform import webbpulse_workspace.example ws-01JABCDEF0123456789ABCDEF
 ```
+
+#### VCS connection
+
+The `vcs_repo` block connects the workspace to a GitHub repository through the
+environment's GitHub App, following the shape of `tfe_workspace`:
+
+```hcl
+resource "webbpulse_workspace" "example" {
+  name                  = "example"
+  engine_version        = "1.9.8"
+  working_directory     = "infra"
+  trigger_patterns      = ["/modules/**/*.tf"]
+  file_triggers_enabled = true
+  speculative_enabled   = true
+
+  vcs_repo {
+    identifier = "WebbPulse/example-infra"
+    branch     = "main"
+  }
+}
+```
+
+- `identifier` is the repository as `owner/name` and is required inside the
+  block. The API records GitHub's canonical spelling; a configured spelling
+  that differs only in case is kept, so it causes no diff.
+- `branch` is optional and computed. Left out, the API fills in the
+  repository's default branch when the repository is connected. It stays
+  unchanged while `identifier` names the same repository, so removing a
+  configured `branch` keeps the current branch rather than resetting it. Set it
+  explicitly to change it.
+- `repository_id` and `installation_id` are computed: GitHub's repository id,
+  which keeps the connection through a rename, and the App installation that
+  covered it. Both are null when the environment has no GitHub App, in which
+  case the first upload records the id.
+- Removing the block disconnects the repository: the update sends an explicit
+  null for both `vcs_repo` and `tracked_branch`.
+
+`working_directory`, `trigger_patterns`, `file_triggers_enabled` and
+`speculative_enabled` are top level, as on `tfe_workspace`. An upload starts a
+run only when a changed path is under `working_directory` or matches a
+`trigger_patterns` glob; `file_triggers_enabled = false` starts a run on every
+push to the tracked branch. `speculative_enabled` maps to the API's
+`speculative_plans` and controls whether a pull request starts a plan only run.
+
+Connecting a repository the App is not installed on, or whose installation does
+not grant it, is a 422 carrying `VCS_REPO_NOT_INSTALLED`, which surfaces as an
+error on `vcs_repo.identifier` telling you to install the App on the
+repository. A `GITHUB_UNAVAILABLE` error means the API could not reach GitHub
+and the apply can be retried.
 
 ### `webbpulse_variable`
 
@@ -111,7 +162,9 @@ terraform import webbpulse_variable.example ws-01JABCDEF0123456789ABCDEF/region
 
 - `webbpulse_workspace` reads one workspace by `workspace_id` or by `name`.
   Exactly one of the two is set. The API has no name lookup route, so a lookup
-  by name lists every workspace and filters in the provider.
+  by name lists every workspace and filters in the provider. It returns the
+  same attributes as the resource, with `vcs_repo` as a computed object that is
+  null when no repository is connected.
 - `webbpulse_workspaces` returns every workspace's `ids` and `names`. The API
   takes no filters on its listing route.
 - `webbpulse_run_role_check` reports whether the runner has assumed a
@@ -170,6 +223,12 @@ resources matter.
 ```sh
 TF_ACC=1 WEBBPULSE_TF_HOST=... WEBBPULSE_TF_TOKEN=... go test ./... -run TestAcc -v
 ```
+
+`TestAccWorkspaceVCS` also needs `WEBBPULSE_TF_ACC_VCS_REPO`, an `owner/name`
+the environment's GitHub App is installed on, and skips without it.
+`TestWorkspaceVCSLifecycle` drives the same flow through real Terraform plans
+against an in-memory fake API, so it runs in `go test ./...` with no
+credentials.
 
 ## Backlog
 
