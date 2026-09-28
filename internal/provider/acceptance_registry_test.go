@@ -24,11 +24,7 @@ const EnvAccRegistryProvider = "WEBBPULSE_TF_ACC_REGISTRY_PROVIDER"
 // from the same environment the provider under test reads.
 func testAccClient(t *testing.T) *client.Client {
 	t.Helper()
-	var options []client.Option
-	if gate := os.Getenv(EnvAccGateHeader); gate != "" {
-		options = append(options, client.WithHeader("x-origin-verify", gate))
-	}
-	c, err := client.New(os.Getenv(EnvHost), os.Getenv(EnvToken), options...)
+	c, err := client.New(os.Getenv(EnvHost), os.Getenv(EnvToken), client.WithOriginVerify(os.Getenv(EnvOriginVerify)))
 	if err != nil {
 		t.Fatal(err)
 	}

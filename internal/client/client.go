@@ -19,6 +19,10 @@ import (
 // APIPath is the version prefix every route in this client sits under.
 const APIPath = "/api/v1"
 
+// OriginVerifyHeader is the header the edge access gate checks before API
+// Gateway lets a request through.
+const OriginVerifyHeader = "x-origin-verify"
+
 const defaultTimeout = 60 * time.Second
 
 // Client talks to one control plane. It is safe for concurrent use.
@@ -44,8 +48,16 @@ func WithUserAgent(userAgent string) Option {
 	return func(c *Client) { c.userAgent = userAgent }
 }
 
-// WithHeader adds a header to every request, such as the staging access gate
-// header an acceptance run carries.
+// WithOriginVerify sends the access gate value as x-origin-verify on every
+// request. An empty value sends no header.
+func WithOriginVerify(value string) Option {
+	if value == "" {
+		return func(*Client) {}
+	}
+	return WithHeader(OriginVerifyHeader, value)
+}
+
+// WithHeader adds a header to every request.
 func WithHeader(name, value string) Option {
 	return func(c *Client) {
 		if c.headers == nil {

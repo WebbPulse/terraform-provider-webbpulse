@@ -11,7 +11,7 @@ import (
 	resourceschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 )
 
-// TestProviderSchemaMarksTheTokenSensitive checks the token is sensitive and both settings are optional.
+// TestProviderSchemaMarksTheTokenSensitive checks the token and gate value are sensitive and every setting is optional.
 func TestProviderSchemaMarksTheTokenSensitive(t *testing.T) {
 	t.Parallel()
 
@@ -31,6 +31,17 @@ func TestProviderSchemaMarksTheTokenSensitive(t *testing.T) {
 	}
 	if token.Required {
 		t.Error("token is required, but it has an environment variable fallback")
+	}
+
+	originVerify, ok := resp.Schema.Attributes["origin_verify"].(providerschema.StringAttribute)
+	if !ok {
+		t.Fatal("origin_verify is not a string attribute")
+	}
+	if !originVerify.Sensitive {
+		t.Error("origin_verify is not marked sensitive")
+	}
+	if originVerify.Required {
+		t.Error("origin_verify is required, but it is optional with an environment variable fallback")
 	}
 
 	host, ok := resp.Schema.Attributes["host"].(providerschema.StringAttribute)

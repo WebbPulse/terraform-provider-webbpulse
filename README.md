@@ -19,7 +19,7 @@ terraform {
   required_providers {
     webbpulse = {
       source  = "staging.terraform.webbpulse.com/WebbPulse/webbpulse"
-      version = "0.2.0-rc.1"
+      version = "0.2.0-rc.2"
     }
   }
 }
@@ -41,9 +41,17 @@ provider "webbpulse" {
 | --- | --- | --- |
 | `host` | `WEBBPULSE_TF_HOST` | Base URL. The `/api/v1` suffix is added when absent. Required, no default. |
 | `token` | `WEBBPULSE_TF_TOKEN` | A bearer token: an agent API key (`wpk_` prefix) or a user JWT. Marked sensitive. |
+| `origin_verify` | `WEBBPULSE_TF_ORIGIN_VERIFY` | The edge access gate value, sent as `x-origin-verify` on every API request. Optional and marked sensitive; unset sends no header. |
 
 Set the token through the environment rather than in a configuration file, so
 it stays out of version control and out of the state file.
+
+Staging and production sit behind an edge access gate: API Gateway answers 403
+to any request without the `x-origin-verify` header or a gate cookie, so a
+provider driven by a `wpk_` key needs `origin_verify`. The value lives in the
+environment's SSM parameter held by the gate module; resolve it in the calling
+pipeline (for example `aws ssm get-parameter --with-decryption`, masked) and
+pass it through `WEBBPULSE_TF_ORIGIN_VERIFY`. The provider never logs it.
 
 ## Resources
 
@@ -241,15 +249,16 @@ go test ./...
 ```
 
 Acceptance tests are guarded by `TF_ACC` and skip unless `WEBBPULSE_TF_HOST`
-and `WEBBPULSE_TF_TOKEN` are both set. `WEBBPULSE_TF_ACC_GATE_HEADER` adds the
-staging access gate header. `WEBBPULSE_TF_ACC_VCS_REPO` (an `owner/name` the
+and `WEBBPULSE_TF_TOKEN` are both set. The provider under test reads the gate
+value from `WEBBPULSE_TF_ORIGIN_VERIFY` like any configuration. `WEBBPULSE_TF_ACC_VCS_REPO` (an `owner/name` the
 App is installed on) enables the workspace VCS and registry module tests, and
 `WEBBPULSE_TF_ACC_REGISTRY_PROVIDER` (`namespace/type` of an existing provider)
 enables the registry provider test, which reads and imports without persisting.
 
 The `acceptance` workflow (manual dispatch, `staging-acceptance` environment)
 runs them against staging: it assumes the
-`webbpulse-terraform-staging-provider-acceptance` role, reads the gate header,
+`webbpulse-terraform-staging-provider-acceptance` role, reads the gate value
+from SSM into `WEBBPULSE_TF_ORIGIN_VERIFY`,
 mints a KMS signed admin token, creates an ephemeral `e2e-` user and a `wpk_`
 key, runs `go test -run TestAcc`, then revokes the key and deletes the user.
 The role lives in WebbPulse-Terraform `terraform/provider_acceptance.tf`.
@@ -296,6 +305,10 @@ gpg --verify terraform-provider-webbpulse_<version>_SHA256SUMS.sig \
 ```
 
 ## Backlog
+
+- An `origin_verify_ssm_parameter` attribute that reads the gate value from SSM
+  through the AWS SDK default chain, if the Platform factory wants the provider
+  to resolve it rather than its pipeline.
 
 - An `hcl` flag on `webbpulse_variable`, once the API ships it
   (WebbPulse-Terraform PR 67, not merged yet).

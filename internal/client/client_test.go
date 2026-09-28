@@ -484,3 +484,43 @@ func TestNonJSONErrorBodyStillSurfaces(t *testing.T) {
 		t.Errorf("message = %q, want the HTTP status without the raw body", apiErr.Message)
 	}
 }
+
+// TestWithOriginVerifySendsTheGateHeader checks the gate value rides on every
+// request and an empty value sends no header at all.
+func TestWithOriginVerifySendsTheGateHeader(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		value   string
+		present bool
+	}{
+		"set":   {"synthetic-gate", true},
+		"empty": {"", false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			var got []string
+			var present bool
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				got, present = r.Header[http.CanonicalHeaderKey(OriginVerifyHeader)]
+				_, _ = w.Write([]byte(`{"items":[]}`))
+			}))
+			t.Cleanup(server.Close)
+
+			c, err := New(server.URL, "wpk_test", WithHTTPClient(server.Client()), WithOriginVerify(tc.value))
+			if err != nil {
+				t.Fatalf("New returned %v", err)
+			}
+			if err := c.do(context.Background(), http.MethodGet, "/registry/modules", nil, nil); err != nil {
+				t.Fatalf("request returned %v", err)
+			}
+			if present != tc.present {
+				t.Fatalf("header present = %v, want %v", present, tc.present)
+			}
+			if tc.present && (len(got) != 1 || got[0] != tc.value) {
+				t.Fatalf("header = %v, want [%q]", got, tc.value)
+			}
+		})
+	}
+}

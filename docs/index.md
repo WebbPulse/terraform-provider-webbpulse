@@ -16,7 +16,7 @@ terraform {
   required_providers {
     webbpulse = {
       source  = "staging.terraform.webbpulse.com/WebbPulse/webbpulse"
-      version = "0.2.0-rc.1"
+      version = "0.2.0-rc.2"
     }
   }
 }
@@ -32,4 +32,5 @@ provider "webbpulse" {
 ### Optional
 
 - `host` (String) Base URL of the control plane API, such as `https://api.staging.terraform.webbpulse.com`. The `/api/v1` suffix is added when absent. Falls back to the `WEBBPULSE_TF_HOST` environment variable. There is no default, so a configuration always names the environment it manages.
+- `origin_verify` (String, Sensitive) The edge access gate value, sent as the `x-origin-verify` header on every API request. Needed when the control plane sits behind the access gate, which otherwise answers 403. Falls back to the `WEBBPULSE_TF_ORIGIN_VERIFY` environment variable. Left unset, no header is sent.
 - `token` (String, Sensitive) A bearer token: an agent API key, which carries a `wpk_` prefix, or a user JWT. Falls back to the `WEBBPULSE_TF_TOKEN` environment variable.

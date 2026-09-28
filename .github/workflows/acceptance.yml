@@ -55,7 +55,7 @@ jobs:
           set -euo pipefail
           gate="$(aws ssm get-parameter --name "$GATE_PARAMETER" --with-decryption --query Parameter.Value --output text)"
           echo "::add-mask::$gate"
-          echo "WEBBPULSE_TF_ACC_GATE_HEADER=$gate" >> "$GITHUB_ENV"
+          echo "WEBBPULSE_TF_ORIGIN_VERIFY=$gate" >> "$GITHUB_ENV"
 
       - name: Create an ephemeral admin user and key
         id: user
@@ -68,7 +68,7 @@ jobs:
           set -euo pipefail
           b64u() { base64 -w0 | tr '+/' '-_' | tr -d '='; }
           call() {
-            curl -sS -o "$RUNNER_TEMP/body.json" -w '%{http_code}' -H "x-origin-verify: $WEBBPULSE_TF_ACC_GATE_HEADER" -H 'content-type: application/json' "$@"
+            curl -sS -o "$RUNNER_TEMP/body.json" -w '%{http_code}' -H "x-origin-verify: $WEBBPULSE_TF_ORIGIN_VERIFY" -H 'content-type: application/json' "$@"
           }
 
           kid="$(aws kms get-public-key --key-id "$KEY_ID" --query PublicKey --output text | base64 -d | sha256sum | cut -d' ' -f1 | xxd -r -p | b64u)"
@@ -129,12 +129,12 @@ jobs:
           set -uo pipefail
           failed=0
           if [ -n "${API_KEY_ID:-}" ] && [ -n "${SESSION_TOKEN:-}" ]; then
-            status="$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE -H "x-origin-verify: $WEBBPULSE_TF_ACC_GATE_HEADER" -H "authorization: Bearer $SESSION_TOKEN" "$HOST/api/v1/api-keys/$API_KEY_ID")"
+            status="$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE -H "x-origin-verify: $WEBBPULSE_TF_ORIGIN_VERIFY" -H "authorization: Bearer $SESSION_TOKEN" "$HOST/api/v1/api-keys/$API_KEY_ID")"
             echo "revoking the key answered $status"
             [ "$status" = 200 ] || failed=1
           fi
           if [ -n "${USER_ID:-}" ] && [ -n "${ADMIN_TOKEN:-}" ]; then
-            status="$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE -H "x-origin-verify: $WEBBPULSE_TF_ACC_GATE_HEADER" -H "authorization: Bearer $ADMIN_TOKEN" "$HOST/api/auth/e2e/users/$USER_ID")"
+            status="$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE -H "x-origin-verify: $WEBBPULSE_TF_ORIGIN_VERIFY" -H "authorization: Bearer $ADMIN_TOKEN" "$HOST/api/auth/e2e/users/$USER_ID")"
             echo "deleting the user answered $status"
             [ "$status" = 200 ] || failed=1
           fi
