@@ -1,11 +1,15 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/WebbPulse/terraform-provider-webbpulse/internal/client"
 
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
@@ -40,6 +44,35 @@ func testAccPreCheck(t *testing.T) {
 		if os.Getenv(name) == "" {
 			t.Skipf("acceptance tests need %s", name)
 		}
+	}
+}
+
+// TestAccSweepStaleWorkspaces deletes tfacc- workspaces a failed earlier run
+// left behind. The acceptance workflow never overlaps itself, so any such
+// workspace older than ten minutes belongs to no running test.
+func TestAccSweepStaleWorkspaces(t *testing.T) {
+	testAccPreCheck(t)
+
+	c, err := client.New(os.Getenv(EnvHost), os.Getenv(EnvToken), client.WithOriginVerify(os.Getenv(EnvOriginVerify)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	workspaces, err := c.ListWorkspaces(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cutoff := time.Now().Add(-10 * time.Minute)
+	for _, ws := range workspaces {
+		created, parseErr := time.Parse(time.RFC3339Nano, ws.CreatedAt)
+		if !strings.HasPrefix(ws.Name, "tfacc-") || parseErr != nil || created.After(cutoff) {
+			continue
+		}
+		if err := c.DeleteWorkspace(ctx, ws.WorkspaceID, true); err != nil && !client.IsNotFound(err) {
+			t.Errorf("deleting stale workspace %s: %v", ws.Name, err)
+			continue
+		}
+		t.Logf("deleted stale workspace %s", ws.Name)
 	}
 }
 
@@ -412,6 +445,10 @@ data "webbpulse_workspace" "test" {
 				),
 			},
 			{
+				Config:      config(`  plan_assume_role_arns = ["arn:aws:iam::111122223333:role/tfacc-*"]`),
+				ExpectError: regexp.MustCompile(`exact IAM role ARN`),
+			},
+			{
 				Config: config(`  plan_assume_role_arns = []`),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(address, "plan_assume_role_arns.#", "0"),
@@ -441,10 +478,6 @@ data "webbpulse_workspace" "test" {
 					resource.TestCheckResourceAttr(address, "plan_assume_role_arns.#", "0"),
 					resource.TestCheckResourceAttr("data.webbpulse_workspace.test", "plan_assume_role_arns.#", "0"),
 				),
-			},
-			{
-				Config:      config(`  plan_assume_role_arns = ["arn:aws:iam::111122223333:role/tfacc-*"]`),
-				ExpectError: regexp.MustCompile(`exact IAM role ARN`),
 			},
 		},
 	})
