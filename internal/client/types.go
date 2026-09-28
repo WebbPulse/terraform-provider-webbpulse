@@ -75,6 +75,7 @@ type Variable struct {
 	Value       *string `json:"value"`
 	Category    string  `json:"category"`
 	Sensitive   bool    `json:"sensitive"`
+	HCL         bool    `json:"hcl"`
 	Description string  `json:"description"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   *string `json:"updated_at"`
@@ -85,6 +86,7 @@ type VariableWrite struct {
 	Value       string `json:"value"`
 	Category    string `json:"category,omitempty"`
 	Sensitive   bool   `json:"sensitive"`
+	HCL         bool   `json:"hcl"`
 	Description string `json:"description,omitempty"`
 }
 

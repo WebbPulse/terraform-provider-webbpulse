@@ -35,6 +35,7 @@ type variableModel struct {
 	Value       types.String `tfsdk:"value"`
 	Category    types.String `tfsdk:"category"`
 	Sensitive   types.Bool   `tfsdk:"sensitive"`
+	HCL         types.Bool   `tfsdk:"hcl"`
 	Description types.String `tfsdk:"description"`
 	CreatedAt   types.String `tfsdk:"created_at"`
 	UpdatedAt   types.String `tfsdk:"updated_at"`
@@ -81,6 +82,14 @@ func (r *variableResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Default:  booldefault.StaticBool(false),
 				MarkdownDescription: "Whether the value is sealed at rest and withheld from every read. " +
 					"A sensitive value cannot be imported, since the API will not return it.",
+			},
+			"hcl": schema.BoolAttribute{
+				Optional: true,
+				Computed: true,
+				Default:  booldefault.StaticBool(false),
+				MarkdownDescription: "Whether `value` is an HCL expression, such as a list or a map, rather than a " +
+					"literal string. Only a `terraform` category variable can be HCL, and the API refuses an " +
+					"expression that cannot parse. Changing it updates the variable in place.",
 			},
 			"description": schema.StringAttribute{
 				Optional:            true,
@@ -230,6 +239,7 @@ func (r *variableResource) write(
 		Value:       plan.Value.ValueString(),
 		Category:    plan.Category.ValueString(),
 		Sensitive:   plan.Sensitive.ValueBool(),
+		HCL:         plan.HCL.ValueBool(),
 		Description: plan.Description.ValueString(),
 	}
 
@@ -256,6 +266,7 @@ func applyVariable(from *client.Variable, into *variableModel) {
 	}
 	into.Category = types.StringValue(from.Category)
 	into.Sensitive = types.BoolValue(from.Sensitive)
+	into.HCL = types.BoolValue(from.HCL)
 	into.Description = types.StringValue(from.Description)
 	into.CreatedAt = types.StringValue(from.CreatedAt)
 	into.UpdatedAt = optionalString(from.UpdatedAt)

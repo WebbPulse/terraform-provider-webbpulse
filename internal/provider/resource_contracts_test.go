@@ -10,6 +10,7 @@ import (
 
 	"github.com/WebbPulse/terraform-provider-webbpulse/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	rschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
@@ -244,6 +245,87 @@ func TestSensitiveVariableLifecycle(t *testing.T) {
 	}
 	if strings.Join(methods, " ") != "GET PUT PUT GET GET" {
 		t.Fatalf("unexpected lifecycle requests %v", methods)
+	}
+}
+
+// TestHCLVariableLifecycle checks hcl is sent on every write, round-trips on
+// read, is kept on import, and changes in place rather than by replacement.
+func TestHCLVariableLifecycle(t *testing.T) {
+	ctx := context.Background()
+	const listValue = `["us-west-2", "eu-west-1"]`
+	stored := client.Variable{WorkspaceID: "ws-test", Key: "regions", Value: nil, Category: "terraform", CreatedAt: "created"}
+	var writes []client.VariableWrite
+	r := &variableResource{client: contractClient(t, func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path != "/api/v1/workspaces/ws-test/variables/regions" {
+			t.Errorf("unexpected path %s", req.URL.Path)
+		}
+		switch req.Method {
+		case http.MethodGet:
+			if stored.Value == nil {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"message":"No such variable.","error_code":"NOT_FOUND"}`))
+				return
+			}
+		case http.MethodPut:
+			var raw map[string]any
+			if err := json.NewDecoder(req.Body).Decode(&raw); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := raw["hcl"]; !ok {
+				t.Error("write omitted hcl, so turning it off would not reach the API")
+			}
+			body := client.VariableWrite{Value: raw["value"].(string), Category: raw["category"].(string), HCL: raw["hcl"].(bool)}
+			writes = append(writes, body)
+			value := body.Value
+			stored.Value, stored.HCL = &value, body.HCL
+		default:
+			t.Errorf("unexpected %s", req.Method)
+		}
+		_ = json.NewEncoder(w).Encode(stored)
+	})}
+
+	model := variableModel{WorkspaceID: types.StringValue("ws-test"), Key: types.StringValue("regions"), Value: types.StringValue(listValue), Category: types.StringValue("terraform"), Sensitive: types.BoolValue(false), HCL: types.BoolValue(true), Description: types.StringValue("")}
+	planned := resourceState(t, r, &model)
+	created := resource.CreateResponse{State: tfsdk.State{Schema: planned.Schema}}
+	r.Create(ctx, resource.CreateRequest{Plan: tfsdk.Plan(planned)}, &created)
+	if created.Diagnostics.HasError() {
+		t.Fatal(created.Diagnostics)
+	}
+
+	read := resource.ReadResponse{State: created.State}
+	r.Read(ctx, resource.ReadRequest{State: created.State}, &read)
+	var got variableModel
+	if diags := read.State.Get(ctx, &got); diags.HasError() || !got.HCL.ValueBool() || got.Value.ValueString() != listValue {
+		t.Fatalf("read lost hcl or the expression: %+v", got)
+	}
+
+	imported := resource.ImportStateResponse{State: tfsdk.State{Schema: planned.Schema}}
+	r.ImportState(ctx, resource.ImportStateRequest{ID: "ws-test/regions"}, &imported)
+	if imported.Diagnostics.HasError() {
+		t.Fatal(imported.Diagnostics)
+	}
+	if diags := imported.State.Get(ctx, &got); diags.HasError() || !got.HCL.ValueBool() {
+		t.Fatal("import dropped hcl")
+	}
+
+	model.HCL = types.BoolValue(false)
+	planned = resourceState(t, r, &model)
+	updated := resource.UpdateResponse{State: read.State}
+	r.Update(ctx, resource.UpdateRequest{State: read.State, Plan: tfsdk.Plan(planned)}, &updated)
+	if updated.Diagnostics.HasError() {
+		t.Fatal(updated.Diagnostics)
+	}
+	if diags := updated.State.Get(ctx, &got); diags.HasError() || got.HCL.ValueBool() {
+		t.Fatal("update did not turn hcl off")
+	}
+	if len(writes) != 2 || !writes[0].HCL || writes[1].HCL {
+		t.Fatalf("unexpected writes %+v", writes)
+	}
+
+	var schema resource.SchemaResponse
+	r.Schema(ctx, resource.SchemaRequest{}, &schema)
+	if mods := schema.Schema.Attributes["hcl"].(rschema.BoolAttribute).PlanModifiers; len(mods) != 0 {
+		t.Fatal("hcl must change in place, since the PUT route rewrites it")
 	}
 }
 

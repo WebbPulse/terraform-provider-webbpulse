@@ -2,7 +2,7 @@ terraform {
   required_providers {
     webbpulse = {
       source  = "staging.terraform.webbpulse.com/WebbPulse/webbpulse"
-      version = "0.2.0-rc.2"
+      version = "0.2.0-rc.3"
     }
   }
 }
