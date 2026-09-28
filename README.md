@@ -230,6 +230,43 @@ the environment's GitHub App is installed on, and skips without it.
 against an in-memory fake API, so it runs in `go test ./...` with no
 credentials.
 
+## Releases
+
+A pushed `vX.Y.Z` tag runs `release.yml`, which builds with GoReleaser and
+publishes a GitHub release in the Terraform registry layout: one
+`terraform-provider-webbpulse_<version>_<os>_<arch>.zip` per platform,
+`_SHA256SUMS`, its detached signature `_SHA256SUMS.sig` and `_manifest.json`
+(protocol 6.0). A prerelease tag (`v0.1.0-rc.1`) signs with the staging key in
+the `staging` environment and is marked a prerelease; a plain tag signs with the
+production key in the `production` environment. The workflow checks the
+signature and the sums before it finishes.
+
+Each environment has its own RSA 4096 signing key, generated once in CI by the
+`signing-key` workflow (manual dispatch, run in the `<env>-signing-key`
+environment, which only `main` may deploy to). It refuses to run when the key
+already exists. The private half goes straight into the
+`webbpulse-terraform-<env>-provider-signing-key` secret in that environment's
+WebbPulse-Terraform account, whose resource policy lets only the
+`webbpulse-terraform-<env>-provider-release` role read it and only the
+`...-provider-signing-keygen` role write it. Each role trusts only its one
+environment of this repository. The public half and the long key id are the
+SSM String parameters `/webbpulse-terraform-<env>/provider-signing/public-key`
+and `.../key-id`, where the registry reads them. `<env>` is `staging` or `prod`.
+The roles, secret and parameters live in WebbPulse-Terraform `terraform/provider_signing.tf`.
+
+Environment variables on this repository: `SIGNING_KEY_ROLE_ARN` and
+`SIGNING_KEY_SECRET_ID` on all four environments, plus
+`SIGNING_KEY_PARAMETER_PREFIX` on the two `-signing-key` ones.
+
+To check a release by hand:
+
+```sh
+aws ssm get-parameter --name /webbpulse-terraform-staging/provider-signing/public-key \
+  --query Parameter.Value --output text | gpg --import
+gpg --verify terraform-provider-webbpulse_<version>_SHA256SUMS.sig \
+  terraform-provider-webbpulse_<version>_SHA256SUMS
+```
+
 ## Backlog
 
 - An `hcl` flag on `webbpulse_variable`, once the API ships it
@@ -244,5 +281,5 @@ credentials.
   per variable.
 - No ETag or version on a workspace, so an update cannot be made conditional
   and a concurrent edit is last write wins.
-- No registry, so install is a local build plus `dev_overrides`. Publishing and
-  GPG signing come later.
+- No registry, so install is a local build plus `dev_overrides`. Signed
+  releases exist; the registry's `providers.v1` protocol does not serve them yet.

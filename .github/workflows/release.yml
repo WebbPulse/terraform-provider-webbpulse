@@ -1,0 +1,102 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: Resolve the signing environment
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.pick.outputs.environment }}
+    steps:
+      - name: Pick the environment from the tag
+        id: pick
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::$TAG is not a semantic version tag"
+            exit 1
+          fi
+          if [[ "$TAG" == *-* ]]; then
+            echo "environment=staging" >> "$GITHUB_OUTPUT"
+          else
+            echo "environment=production" >> "$GITHUB_OUTPUT"
+          fi
+
+  release:
+    name: Build, sign and publish
+    needs: resolve
+    runs-on: ubuntu-latest
+    environment: ${{ needs.resolve.outputs.environment }}
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      SECRET_ID: ${{ vars.SIGNING_KEY_SECRET_ID }}
+    steps:
+      - name: Check out the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Assume the release role
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.SIGNING_KEY_ROLE_ARN }}
+          aws-region: us-west-2
+
+      - name: Import the signing key
+        id: key
+        run: |
+          set -euo pipefail
+          umask 077
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          mkdir -p "$GNUPGHOME"
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+          aws secretsmanager get-secret-value --secret-id "$SECRET_ID" --query SecretString --output text | gpg --batch --import
+          fingerprint="$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "fpr" { print $10; exit }')"
+          if [ -z "$fingerprint" ]; then
+            echo "::error::The signing key secret holds no usable key"
+            exit 1
+          fi
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+
+      - name: Release with GoReleaser
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GPG_FINGERPRINT: ${{ steps.key.outputs.fingerprint }}
+
+      - name: Verify the signed checksums
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          prefix="terraform-provider-webbpulse_${GITHUB_REF_NAME#v}"
+          cp ../terraform-registry-manifest.json "${prefix}_manifest.json"
+          gpg --batch --verify "${prefix}_SHA256SUMS.sig" "${prefix}_SHA256SUMS"
+          sha256sum --check --strict "${prefix}_SHA256SUMS"
+
+      - name: Forget the signing key
+        if: always()
+        run: |
+          gpgconf --kill all || true
+          rm -rf "$GNUPGHOME"
