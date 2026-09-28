@@ -21,6 +21,9 @@ const EnvHost = "WEBBPULSE_TF_HOST"
 // EnvToken is the environment variable the token falls back to.
 const EnvToken = "WEBBPULSE_TF_TOKEN"
 
+// EnvOriginVerify is the environment variable the origin_verify value falls back to.
+const EnvOriginVerify = "WEBBPULSE_TF_ORIGIN_VERIFY"
+
 var _ provider.Provider = (*webbpulseProvider)(nil)
 
 type webbpulseProvider struct {
@@ -36,8 +39,9 @@ func New(version string) func() provider.Provider {
 }
 
 type providerModel struct {
-	Host  types.String `tfsdk:"host"`
-	Token types.String `tfsdk:"token"`
+	Host         types.String `tfsdk:"host"`
+	Token        types.String `tfsdk:"token"`
+	OriginVerify types.String `tfsdk:"origin_verify"`
 }
 
 // Metadata sets the provider type name and version.
@@ -64,6 +68,14 @@ func (p *webbpulseProvider) Schema(_ context.Context, _ provider.SchemaRequest, 
 				Sensitive: true,
 				MarkdownDescription: "A bearer token: an agent API key, which carries a `wpk_` prefix, or a " +
 					"user JWT. Falls back to the `" + EnvToken + "` environment variable.",
+			},
+			"origin_verify": schema.StringAttribute{
+				Optional:  true,
+				Sensitive: true,
+				MarkdownDescription: "The edge access gate value, sent as the `" + client.OriginVerifyHeader + "` " +
+					"header on every API request. Needed when the control plane sits behind the access gate, which " +
+					"otherwise answers 403. Falls back to the `" + EnvOriginVerify + "` environment variable. Left " +
+					"unset, no header is sent.",
 			},
 		},
 	}
@@ -93,6 +105,14 @@ func (p *webbpulseProvider) Configure(ctx context.Context, req provider.Configur
 				"supply it through the "+EnvToken+" environment variable.",
 		)
 	}
+	if config.OriginVerify.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("origin_verify"),
+			"Origin verify value is not known at configure time",
+			"The provider cannot be configured with an unknown access gate value. Set it to a literal value, or "+
+				"supply it through the "+EnvOriginVerify+" environment variable.",
+		)
+	}
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -104,6 +124,10 @@ func (p *webbpulseProvider) Configure(ctx context.Context, req provider.Configur
 	token := os.Getenv(EnvToken)
 	if !config.Token.IsNull() {
 		token = config.Token.ValueString()
+	}
+	originVerify := os.Getenv(EnvOriginVerify)
+	if !config.OriginVerify.IsNull() {
+		originVerify = config.OriginVerify.ValueString()
 	}
 
 	if host == "" {
@@ -124,7 +148,11 @@ func (p *webbpulseProvider) Configure(ctx context.Context, req provider.Configur
 		return
 	}
 
-	options := append([]client.Option{client.WithUserAgent("terraform-provider-webbpulse/" + p.version)}, p.clientOptions...)
+	options := []client.Option{client.WithUserAgent("terraform-provider-webbpulse/" + p.version)}
+	if originVerify != "" {
+		options = append(options, client.WithOriginVerify(originVerify))
+	}
+	options = append(options, p.clientOptions...)
 	apiClient, err := client.New(host, token, options...)
 	if err != nil {
 		resp.Diagnostics.AddError("Cannot build the API client", err.Error())
