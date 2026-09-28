@@ -3,12 +3,23 @@ name: release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing semantic version tag to build, sign and upload to the registry
+        required: true
+        type: string
+      environment:
+        description: Registry environment whose key signs the build and whose bucket receives it
+        required: true
+        type: choice
+        options: [staging, production]
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}-${{ inputs.environment || 'tag' }}
   cancel-in-progress: false
 
 jobs:
@@ -17,17 +28,22 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       environment: ${{ steps.pick.outputs.environment }}
+      tag: ${{ steps.pick.outputs.tag }}
     steps:
       - name: Pick the environment from the tag
         id: pick
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+          CHOSEN: ${{ inputs.environment }}
         run: |
           if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::$TAG is not a semantic version tag"
             exit 1
           fi
-          if [[ "$TAG" == *-* ]]; then
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if [ -n "$CHOSEN" ]; then
+            echo "environment=$CHOSEN" >> "$GITHUB_OUTPUT"
+          elif [[ "$TAG" == *-* ]]; then
             echo "environment=staging" >> "$GITHUB_OUTPUT"
           else
             echo "environment=production" >> "$GITHUB_OUTPUT"
@@ -43,10 +59,15 @@ jobs:
       id-token: write
     env:
       SECRET_ID: ${{ vars.SIGNING_KEY_SECRET_ID }}
+      TAG: ${{ needs.resolve.outputs.tag }}
+      GORELEASER_CURRENT_TAG: ${{ needs.resolve.outputs.tag }}
+      UPLOAD_BUCKET: ${{ vars.REGISTRY_UPLOAD_BUCKET }}
+      UPLOAD_KMS_KEY_ARN: ${{ vars.REGISTRY_UPLOAD_KMS_KEY_ARN }}
     steps:
       - name: Check out the tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
           fetch-depth: 0
 
       - name: Set up Go
@@ -81,7 +102,7 @@ jobs:
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           version: "~> v2"
-          args: release --clean
+          args: release --clean ${{ github.event_name == 'workflow_dispatch' && '--skip=publish' || '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GPG_FINGERPRINT: ${{ steps.key.outputs.fingerprint }}
@@ -90,10 +111,30 @@ jobs:
         working-directory: dist
         run: |
           set -euo pipefail
-          prefix="terraform-provider-webbpulse_${GITHUB_REF_NAME#v}"
+          prefix="terraform-provider-webbpulse_${TAG#v}"
           cp ../terraform-registry-manifest.json "${prefix}_manifest.json"
           gpg --batch --verify "${prefix}_SHA256SUMS.sig" "${prefix}_SHA256SUMS"
           sha256sum --check --strict "${prefix}_SHA256SUMS"
+
+      - name: Upload the signed build to the registry
+        if: env.UPLOAD_BUCKET != ''
+        working-directory: dist
+        env:
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          prefix="terraform-provider-webbpulse_${version}"
+          folder="s3://${UPLOAD_BUCKET}/registry/provider-uploads/webbpulse/webbpulse/${version}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/"
+          sse=(--sse aws:kms --sse-kms-key-id "$UPLOAD_KMS_KEY_ARN" --only-show-errors)
+          for file in "${prefix}"_*.zip "${prefix}_SHA256SUMS" "${prefix}_SHA256SUMS.sig" "${prefix}_manifest.json"; do
+            aws s3 cp "$file" "${folder}${file}" "${sse[@]}"
+          done
+          jq -n --arg repository "$GITHUB_REPOSITORY" --arg tag "$TAG" --arg actor "$ACTOR" --arg run_url "$RUN_URL" \
+            '{repository: $repository, tag: $tag, actor: $actor, run_url: $run_url}' > upload.json
+          aws s3 cp upload.json "${folder}upload.json" "${sse[@]}" --content-type application/json
+          echo "Uploaded ${TAG} to ${folder}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Forget the signing key
         if: always()
