@@ -7,16 +7,33 @@ import (
 	"testing"
 	"time"
 
+	"github.com/WebbPulse/terraform-provider-webbpulse/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
+// EnvAccGateHeader names the environment variable carrying the staging access
+// gate header value, which an acceptance run against staging sends as
+// x-origin-verify. The acceptance workflow reads it in CI and masks it.
+const EnvAccGateHeader = "WEBBPULSE_TF_ACC_GATE_HEADER"
+
 // testAccProtoV6ProviderFactories serves this provider in process to the test
 // framework, so an acceptance test needs no installed provider binary.
 var testAccProtoV6ProviderFactories = map[string]func() (tfprotov6.ProviderServer, error){
-	"webbpulse": providerserver.NewProtocol6WithError(New("test")()),
+	"webbpulse": providerserver.NewProtocol6WithError(testAccProvider()),
+}
+
+// testAccProvider is the provider under test, sending the staging gate header
+// when the acceptance environment supplies one.
+func testAccProvider() provider.Provider {
+	p := &webbpulseProvider{version: "test"}
+	if gate := os.Getenv(EnvAccGateHeader); gate != "" {
+		p.clientOptions = append(p.clientOptions, client.WithHeader("x-origin-verify", gate))
+	}
+	return p
 }
 
 // testAccPreCheck skips unless TF_ACC and both credentials are set. Acceptance

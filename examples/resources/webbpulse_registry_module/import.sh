@@ -1,0 +1,1 @@
+terraform import webbpulse_registry_module.network WebbPulse/network/aws

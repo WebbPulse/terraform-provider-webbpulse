@@ -1,0 +1,1 @@
+terraform import webbpulse_variable.region ws-01JABCDEF0123456789ABCDEF/region

@@ -27,6 +27,7 @@ type Client struct {
 	token      string
 	httpClient *http.Client
 	userAgent  string
+	headers    map[string]string
 }
 
 // Option adjusts a Client at construction.
@@ -41,6 +42,17 @@ func WithHTTPClient(httpClient *http.Client) Option {
 // WithUserAgent sets the User-Agent header the client sends.
 func WithUserAgent(userAgent string) Option {
 	return func(c *Client) { c.userAgent = userAgent }
+}
+
+// WithHeader adds a header to every request, such as the staging access gate
+// header an acceptance run carries.
+func WithHeader(name, value string) Option {
+	return func(c *Client) {
+		if c.headers == nil {
+			c.headers = map[string]string{}
+		}
+		c.headers[name] = value
+	}
 }
 
 // New builds a client for one host and token. The host may be given with or
@@ -160,6 +172,9 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
 	if err != nil {
 		return fmt.Errorf("building request: %w", err)
+	}
+	for name, value := range c.headers {
+		req.Header.Set(name, value)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Accept", "application/json")
