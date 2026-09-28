@@ -1,11 +1,15 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/WebbPulse/terraform-provider-webbpulse/internal/client"
 
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
@@ -40,6 +44,35 @@ func testAccPreCheck(t *testing.T) {
 		if os.Getenv(name) == "" {
 			t.Skipf("acceptance tests need %s", name)
 		}
+	}
+}
+
+// TestAccSweepStaleWorkspaces deletes tfacc- workspaces a failed earlier run
+// left behind. The acceptance workflow never overlaps itself, so any such
+// workspace older than ten minutes belongs to no running test.
+func TestAccSweepStaleWorkspaces(t *testing.T) {
+	testAccPreCheck(t)
+
+	c, err := client.New(os.Getenv(EnvHost), os.Getenv(EnvToken), client.WithOriginVerify(os.Getenv(EnvOriginVerify)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	workspaces, err := c.ListWorkspaces(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cutoff := time.Now().Add(-10 * time.Minute)
+	for _, ws := range workspaces {
+		created, parseErr := time.Parse(time.RFC3339Nano, ws.CreatedAt)
+		if !strings.HasPrefix(ws.Name, "tfacc-") || parseErr != nil || created.After(cutoff) {
+			continue
+		}
+		if err := c.DeleteWorkspace(ctx, ws.WorkspaceID, true); err != nil && !client.IsNotFound(err) {
+			t.Errorf("deleting stale workspace %s: %v", ws.Name, err)
+			continue
+		}
+		t.Logf("deleted stale workspace %s", ws.Name)
 	}
 }
 
@@ -357,6 +390,93 @@ data "webbpulse_workspace" "test" {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckNoResourceAttr(address, "vcs_repo.identifier"),
 					resource.TestCheckNoResourceAttr("data.webbpulse_workspace.test", "vcs_repo.identifier"),
+				),
+			},
+		},
+	})
+}
+
+// TestAccWorkspacePlanAssumeRoleARNs sets, replaces, empties, re-sets, removes
+// and imports plan_assume_role_arns against a live API, reading it back through
+// the data source. The ARNs are exact but name no real roles, which the API
+// does not require.
+func TestAccWorkspacePlanAssumeRoleARNs(t *testing.T) {
+	testAccPreCheck(t)
+
+	name := testAccName("planroles")
+	const address = "webbpulse_workspace.test"
+	const roleA = "arn:aws:iam::111122223333:role/tfacc-route53-reader"
+	const roleB = "arn:aws:iam::444455556666:role/tfacc/dns-reader"
+	config := func(arns string) string {
+		return fmt.Sprintf(`
+resource "webbpulse_workspace" "test" {
+  name           = %q
+  engine_version = "1.9.8"
+%s
+}
+
+data "webbpulse_workspace" "test" {
+  workspace_id = webbpulse_workspace.test.workspace_id
+}
+`, name, arns)
+	}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		Steps: []resource.TestStep{
+			{
+				Config: config(fmt.Sprintf(`  plan_assume_role_arns = [%q, %q]`, roleA, roleB)),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(address, "plan_assume_role_arns.#", "2"),
+					resource.TestCheckTypeSetElemAttr(address, "plan_assume_role_arns.*", roleA),
+					resource.TestCheckTypeSetElemAttr(address, "plan_assume_role_arns.*", roleB),
+					resource.TestCheckResourceAttr("data.webbpulse_workspace.test", "plan_assume_role_arns.#", "2"),
+				),
+			},
+			{
+				Config: config(fmt.Sprintf(`  plan_assume_role_arns = [%q]`, roleB)),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(address, plancheck.ResourceActionUpdate)},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(address, "plan_assume_role_arns.#", "1"),
+					resource.TestCheckTypeSetElemAttr(address, "plan_assume_role_arns.*", roleB),
+				),
+			},
+			{
+				Config:      config(`  plan_assume_role_arns = ["arn:aws:iam::111122223333:role/tfacc-*"]`),
+				ExpectError: regexp.MustCompile(`exact IAM role ARN`),
+			},
+			{
+				Config: config(`  plan_assume_role_arns = []`),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(address, "plan_assume_role_arns.#", "0"),
+					resource.TestCheckResourceAttr("data.webbpulse_workspace.test", "plan_assume_role_arns.#", "0"),
+				),
+			},
+			{
+				Config: config(fmt.Sprintf(`  plan_assume_role_arns = [%q]`, roleA)),
+				Check:  resource.TestCheckTypeSetElemAttr(address, "plan_assume_role_arns.*", roleA),
+			},
+			{
+				ResourceName:                         address,
+				ImportState:                          true,
+				ImportStateVerify:                    true,
+				ImportStateVerifyIdentifierAttribute: "workspace_id",
+				ImportStateIdFunc: func(state *terraform.State) (string, error) {
+					rs, ok := state.RootModule().Resources[address]
+					if !ok {
+						return "", fmt.Errorf("the workspace is not in state")
+					}
+					return rs.Primary.Attributes["workspace_id"], nil
+				},
+			},
+			{
+				Config: config(""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(address, "plan_assume_role_arns.#", "0"),
+					resource.TestCheckResourceAttr("data.webbpulse_workspace.test", "plan_assume_role_arns.#", "0"),
 				),
 			},
 		},

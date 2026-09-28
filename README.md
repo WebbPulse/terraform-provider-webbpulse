@@ -19,7 +19,7 @@ terraform {
   required_providers {
     webbpulse = {
       source  = "staging.terraform.webbpulse.com/WebbPulse/webbpulse"
-      version = "0.2.0-rc.3"
+      version = "0.2.0-rc.4"
     }
   }
 }
@@ -83,7 +83,15 @@ naming the code.
 
 Optional: `force_delete` (default `false`), `trigger_patterns` (default `[]`),
 `file_triggers_enabled` (default `true`), `speculative_enabled` (default
-`true`), and the `vcs_repo` block.
+`true`), `plan_assume_role_arns` (default `[]`), and the `vcs_repo` block.
+
+`plan_assume_role_arns` is a set of exact IAM role ARNs a plan session may
+assume beside its read only access, such as a Route 53 reader role in another
+account; an apply is not limited by it. The validators mirror the API: at most
+10 ARNs, each up to 160 characters and of the form
+`arn:aws:iam::<12 digit account id>:role/<name>`, with no wildcards. It updates
+in place and the PATCH replaces the whole list. Removing it or setting `[]`
+sends an explicit null, which clears it. The data source returns it too.
 
 Computed: `workspace_id`, `created_at`, `updated_at`, `run_role_setup`
 (`principal_arn`, `principal_arns`, `external_id`, `role_name`),

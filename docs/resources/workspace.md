@@ -18,6 +18,10 @@ resource "webbpulse_workspace" "example" {
   engine_version    = "1.9.8"
   working_directory = "infra"
 
+  plan_assume_role_arns = [
+    "arn:aws:iam::111122223333:role/route53-reader",
+  ]
+
   vcs_repo {
     identifier = "WebbPulse/example-infra"
     branch     = "main"
@@ -39,6 +43,7 @@ resource "webbpulse_workspace" "example" {
 - `engine` (String) Which binary runs this workspace, `terraform` or `tofu`.
 - `file_triggers_enabled` (Boolean) Whether uploads are filtered by changed paths against `working_directory` and `trigger_patterns`. `false` starts a run for every push to the tracked branch. Defaults to `true`.
 - `force_delete` (Boolean) Whether destroying this resource deletes the workspace even when its state still tracks resources, leaving them unmanaged. Defaults to `false`, so a workspace that still manages resources is refused with `WORKSPACE_MANAGES_RESOURCES` until they are destroyed. Set it and apply before the destroy, because a destroy reads it from state. It never skips the `WORKSPACE_HAS_ACTIVE_RUN` refusal while a run is active.
+- `plan_assume_role_arns` (Set of String) Exact IAM role ARNs a plan session may assume beside its read only access, such as a Route 53 reader role in another account. At most 10, each up to 160 characters, with no wildcards. An apply is not limited by this list. Removing it, or setting it to `[]`, sends an explicit null and clears the list.
 - `run_role_arn` (String) The role the runner assumes for this workspace. Optional on create: the role's trust policy names the workspace id as its external id, so the role cannot exist until the workspace does. Build it from `run_role_setup`, then set this. Removing it sends an explicit null and clears the role and its recorded check outcome.
 - `speculative_enabled` (Boolean) Whether a pull request upload starts a plan only run. Sent to the API as `speculative_plans`. Defaults to `true`.
 - `trigger_patterns` (List of String) Glob patterns over repository paths, such as `/modules/**/*.tf`. An upload from `vcs_repo` starts a run only when a changed path matches one. Empty, the default, means every change under `working_directory`. Ignored while `file_triggers_enabled` is `false`.

@@ -31,6 +31,7 @@ type Workspace struct {
 	FileTriggersEnabled *bool        `json:"file_triggers_enabled"`
 	VCSRepositoryID     *string      `json:"vcs_repository_id"`
 	VCSInstallationID   *string      `json:"vcs_installation_id"`
+	PlanAssumeRoleARNs  []string     `json:"plan_assume_role_arns"`
 }
 
 // WorkspaceCreate is the body of a workspace create.
@@ -46,9 +47,11 @@ type WorkspaceCreate struct {
 	TriggerPatterns     []string `json:"trigger_patterns,omitempty"`
 	SpeculativePlans    *bool    `json:"speculative_plans,omitempty"`
 	FileTriggersEnabled *bool    `json:"file_triggers_enabled,omitempty"`
+	PlanAssumeRoleARNs  []string `json:"plan_assume_role_arns,omitempty"`
 }
 
-// WorkspaceUpdate omits nil fields; a pointer to a nil string clears a nullable field.
+// WorkspaceUpdate omits nil fields; a pointer to a nil string or a nil slice
+// clears a nullable field.
 type WorkspaceUpdate struct {
 	Engine              *string   `json:"engine,omitempty"`
 	EngineVersion       *string   `json:"engine_version,omitempty"`
@@ -60,6 +63,7 @@ type WorkspaceUpdate struct {
 	TriggerPatterns     *[]string `json:"trigger_patterns,omitempty"`
 	SpeculativePlans    *bool     `json:"speculative_plans,omitempty"`
 	FileTriggersEnabled *bool     `json:"file_triggers_enabled,omitempty"`
+	PlanAssumeRoleARNs  *[]string `json:"plan_assume_role_arns,omitempty"`
 }
 
 // WorkspaceList is the envelope every workspace listing returns.

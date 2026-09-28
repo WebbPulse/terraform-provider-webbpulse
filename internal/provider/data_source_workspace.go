@@ -40,6 +40,7 @@ type workspaceDataModel struct {
 	TriggerPatterns     types.List   `tfsdk:"trigger_patterns"`
 	FileTriggersEnabled types.Bool   `tfsdk:"file_triggers_enabled"`
 	SpeculativeEnabled  types.Bool   `tfsdk:"speculative_enabled"`
+	PlanAssumeRoleARNs  types.Set    `tfsdk:"plan_assume_role_arns"`
 }
 
 // workspaceDataFrom narrows a resource model to the data source model.
@@ -61,6 +62,7 @@ func workspaceDataFrom(m workspaceModel) *workspaceDataModel {
 		TriggerPatterns:     m.TriggerPatterns,
 		FileTriggersEnabled: m.FileTriggersEnabled,
 		SpeculativeEnabled:  m.SpeculativeEnabled,
+		PlanAssumeRoleARNs:  m.PlanAssumeRoleARNs,
 	}
 }
 
@@ -113,6 +115,11 @@ func (d *workspaceDataSource) Schema(_ context.Context, _ datasource.SchemaReque
 			"speculative_enabled": schema.BoolAttribute{
 				Computed:            true,
 				MarkdownDescription: "Whether a pull request upload starts a plan only run.",
+			},
+			"plan_assume_role_arns": schema.SetAttribute{
+				Computed:            true,
+				ElementType:         types.StringType,
+				MarkdownDescription: "Exact IAM role ARNs a plan session may assume beside its read only access.",
 			},
 			"vcs_repo": schema.SingleNestedAttribute{
 				Computed:            true,
