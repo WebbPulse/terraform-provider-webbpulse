@@ -1,33 +1,32 @@
 # terraform-provider-webbpulse
 
 Terraform provider for the WebbPulse Terraform control plane. It manages
-workspaces and their variables, and reads a workspace's run role check.
+workspaces and their variables, private registry modules and providers, and
+reads a workspace's run role check. Per resource reference lives in `docs/`,
+generated with `tfplugindocs generate` from the schema and `examples/`.
 
 Built on the HashiCorp Terraform Plugin Framework v1.19.0, protocol 6.
 
 ## Install
 
-The provider registry is not live yet, so the current path is a local build
-plus a `dev_overrides` block. Registry install is pending.
-
-```sh
-go build -o "$(go env GOPATH)/bin/terraform-provider-webbpulse"
-```
-
-Then in `~/.terraformrc`:
+Prereleases publish to the staging registry. Log in once with
+`terraform login staging.terraform.webbpulse.com` (or set
+`TF_TOKEN_staging_terraform_webbpulse_com` to a `wpk_` key with
+`registry:read`), then:
 
 ```hcl
-provider_installation {
-  dev_overrides {
-    "WebbPulse/webbpulse" = "/home/you/go/bin"
+terraform {
+  required_providers {
+    webbpulse = {
+      source  = "staging.terraform.webbpulse.com/WebbPulse/webbpulse"
+      version = "0.2.0-rc.1"
+    }
   }
-  direct {}
 }
 ```
 
-With a `dev_overrides` block in place Terraform skips `terraform init` for this
-provider and warns that it is overridden, which is expected. `terraform plan`
-and `terraform apply` work as usual.
+For a local build, use `go build -o "$(go env GOPATH)/bin/terraform-provider-webbpulse"`
+and a `dev_overrides` block for `WebbPulse/webbpulse` in `~/.terraformrc`.
 
 ## Configure
 
@@ -158,6 +157,28 @@ normal CLI output; it does not encrypt state. Protect the state backend accordin
 terraform import webbpulse_variable.example ws-01JABCDEF0123456789ABCDEF/region
 ```
 
+### `webbpulse_registry_module`
+
+Connects a GitHub repository the environment's GitHub App sees as a private
+module, like `tfe_registry_module` with `vcs_repo`. Each `vX.Y.Z` or `X.Y.Z` tag
+publishes that version through the push webhook. `name` and `module_provider`
+default from a `terraform-<provider>-<name>` repository name and are required
+otherwise; changing either, or `vcs_repo.identifier`, replaces the module.
+`import_tags` (default `true`) is read on create only. There is no update route,
+so the only in place change is `resync_triggers`: changing its values queues a
+resync of every tag. Delete removes the module and every version. Imports by
+`namespace/name/provider`.
+
+### `webbpulse_registry_provider`
+
+The same for a private provider. The repository must be named
+`terraform-provider-<type>`, and each published GitHub release carrying signed
+GoReleaser artifacts publishes that version. `import_releases` defaults to
+`true`. Imports by `namespace/type`.
+
+Connecting and deleting are step-up gated for a user session, which surfaces as
+`STEP_UP_REQUIRED`; a `wpk_` key is exempt, so run these with a key.
+
 ## Data sources
 
 - `webbpulse_workspace` reads one workspace by `workspace_id` or by `name`.
@@ -167,6 +188,10 @@ terraform import webbpulse_variable.example ws-01JABCDEF0123456789ABCDEF/region
   null when no repository is connected.
 - `webbpulse_workspaces` returns every workspace's `ids` and `names`. The API
   takes no filters on its listing route.
+- `webbpulse_registry_module` and `webbpulse_registry_provider` read one
+  registry entry by address and return its repository, `published_versions`
+  and every version with its status, error, tag or release and commit sha;
+  provider versions also carry protocols, the signing key id and platforms.
 - `webbpulse_run_role_check` reports whether the runner has assumed a
   workspace's run role and returns `status`, `connected`, `account_id`,
   `error`, `run_id` and `checked_at`.
@@ -216,18 +241,21 @@ go test ./...
 ```
 
 Acceptance tests are guarded by `TF_ACC` and skip unless `WEBBPULSE_TF_HOST`
-and `WEBBPULSE_TF_TOKEN` are both set. They create real workspaces, so CI
-leaves them off and they should not be pointed at an environment whose
-resources matter.
+and `WEBBPULSE_TF_TOKEN` are both set. `WEBBPULSE_TF_ACC_GATE_HEADER` adds the
+staging access gate header. `WEBBPULSE_TF_ACC_VCS_REPO` (an `owner/name` the
+App is installed on) enables the workspace VCS and registry module tests, and
+`WEBBPULSE_TF_ACC_REGISTRY_PROVIDER` (`namespace/type` of an existing provider)
+enables the registry provider test, which reads and imports without persisting.
 
-```sh
-TF_ACC=1 WEBBPULSE_TF_HOST=... WEBBPULSE_TF_TOKEN=... go test ./... -run TestAcc -v
-```
+The `acceptance` workflow (manual dispatch, `staging-acceptance` environment)
+runs them against staging: it assumes the
+`webbpulse-terraform-staging-provider-acceptance` role, reads the gate header,
+mints a KMS signed admin token, creates an ephemeral `e2e-` user and a `wpk_`
+key, runs `go test -run TestAcc`, then revokes the key and deletes the user.
+The role lives in WebbPulse-Terraform `terraform/provider_acceptance.tf`.
 
-`TestAccWorkspaceVCS` also needs `WEBBPULSE_TF_ACC_VCS_REPO`, an `owner/name`
-the environment's GitHub App is installed on, and skips without it.
-`TestWorkspaceVCSLifecycle` drives the same flow through real Terraform plans
-against an in-memory fake API, so it runs in `go test ./...` with no
+The `*Lifecycle` tests drive the same flows through real Terraform plans
+against an in-memory fake API, so they run in `go test ./...` with no
 credentials.
 
 ## Releases
@@ -274,6 +302,9 @@ gpg --verify terraform-provider-webbpulse_<version>_SHA256SUMS.sig \
 - No runs resource or data source. `POST /workspaces/{id}/config-versions`
   exists, but the runs domain is not wrapped here yet, so a run cannot be
   queued from Terraform.
+- No live create in the registry provider acceptance test: the only
+  `terraform-provider-<type>` repository the staging App sees is this one,
+  already connected.
 - No filters, pagination or name lookup on `GET /workspaces`, so
   `webbpulse_workspaces` returns everything and a lookup by name filters client
   side. That is fine at the current scale and will not stay fine.
@@ -281,5 +312,3 @@ gpg --verify terraform-provider-webbpulse_<version>_SHA256SUMS.sig \
   per variable.
 - No ETag or version on a workspace, so an update cannot be made conditional
   and a concurrent edit is last write wins.
-- No registry, so install is a local build plus `dev_overrides`. Signed
-  releases exist; the registry's `providers.v1` protocol does not serve them yet.

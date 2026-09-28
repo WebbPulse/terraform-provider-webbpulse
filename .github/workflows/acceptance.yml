@@ -1,0 +1,141 @@
+name: acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      run:
+        description: Go test -run pattern
+        required: false
+        default: TestAcc
+
+permissions:
+  contents: read
+
+concurrency:
+  group: acceptance-staging
+  cancel-in-progress: false
+
+jobs:
+  staging:
+    name: Acceptance (staging)
+    runs-on: ubuntu-latest
+    environment: staging-acceptance
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      HOST: ${{ vars.ACCEPTANCE_HOST }}
+      TEST_PATTERN: ${{ inputs.run || 'TestAcc' }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_wrapper: false
+
+      - name: Assume the acceptance role
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.ACCEPTANCE_ROLE_ARN }}
+          aws-region: us-west-2
+
+      - name: Read the access gate header
+        env:
+          GATE_PARAMETER: ${{ vars.ACCEPTANCE_GATE_PARAMETER }}
+        run: |
+          set -euo pipefail
+          gate="$(aws ssm get-parameter --name "$GATE_PARAMETER" --with-decryption --query Parameter.Value --output text)"
+          echo "::add-mask::$gate"
+          echo "WEBBPULSE_TF_ACC_GATE_HEADER=$gate" >> "$GITHUB_ENV"
+
+      - name: Create an ephemeral admin user and key
+        id: user
+        env:
+          KEY_ID: ${{ vars.ACCEPTANCE_SIGNING_KEY_ID }}
+          ISSUER: ${{ vars.ACCEPTANCE_ISSUER }}
+          AUDIENCE: ${{ vars.ACCEPTANCE_AUDIENCE }}
+          RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          b64u() { base64 -w0 | tr '+/' '-_' | tr -d '='; }
+          call() {
+            curl -sS -o "$RUNNER_TEMP/body.json" -w '%{http_code}' -H "x-origin-verify: $WEBBPULSE_TF_ACC_GATE_HEADER" -H 'content-type: application/json' "$@"
+          }
+
+          kid="$(aws kms get-public-key --key-id "$KEY_ID" --query PublicKey --output text | base64 -d | sha256sum | cut -d' ' -f1 | xxd -r -p | b64u)"
+          now="$(date +%s)"
+          header="$(jq -cn --arg kid "$kid" '{alg:"RS256",typ:"JWT",kid:$kid}' | b64u)"
+          claims="$(jq -cn --arg sub "e2e-tfacc-$RUN_ID-admin" --arg iss "${ISSUER%/}" --arg aud "$AUDIENCE" --argjson now "$now" --arg jti "$(uuidgen | tr -d '-')" \
+            '{roles:["admin"],typ:"access",sub:$sub,iss:$iss,aud:$aud,iat:$now,nbf:$now,exp:($now+3600),jti:$jti}' | b64u)"
+          printf '%s' "$header.$claims" | openssl dgst -sha256 -binary > "$RUNNER_TEMP/digest"
+          signature="$(aws kms sign --key-id "$KEY_ID" --message "fileb://$RUNNER_TEMP/digest" --message-type DIGEST \
+            --signing-algorithm RSASSA_PKCS1_V1_5_SHA_256 --query Signature --output text | base64 -d | b64u)"
+          admin="$header.$claims.$signature"
+          echo "::add-mask::$admin"
+          echo "ADMIN_TOKEN=$admin" >> "$GITHUB_ENV"
+
+          password="$(openssl rand -base64 36 | tr -d '/+=' | cut -c1-28)Aa1-"
+          echo "::add-mask::$password"
+          email="e2e-tfacc-$RUN_ID@e2e.invalid"
+          body="$(jq -cn --arg email "$email" --arg password "$password" '{email:$email,password:$password,attributes:{is_admin:true,email_verified:true}}')"
+          status="$(call -X POST -H "authorization: Bearer $admin" -d "$body" "$HOST/api/auth/e2e/users")"
+          if [ "$status" != 201 ]; then
+            echo "creating the ephemeral user answered $status: $(jq -c '{error_code,message}' "$RUNNER_TEMP/body.json" 2>/dev/null || true)"
+            exit 1
+          fi
+          user_id="$(jq -r '.user_id // .id // .user.id' "$RUNNER_TEMP/body.json")"
+          echo "USER_ID=$user_id" >> "$GITHUB_ENV"
+
+          status="$(call -X POST -d "$(jq -cn --arg email "$email" --arg password "$password" '{email:$email,password:$password}')" "$HOST/api/auth/login")"
+          if [ "$status" != 200 ]; then
+            echo "signing in answered $status: $(jq -c '{error_code,message}' "$RUNNER_TEMP/body.json" 2>/dev/null || true)"
+            exit 1
+          fi
+          access="$(jq -r '.access_token // .accessToken // .token' "$RUNNER_TEMP/body.json")"
+          echo "::add-mask::$access"
+          echo "SESSION_TOKEN=$access" >> "$GITHUB_ENV"
+
+          status="$(call -X POST -H "authorization: Bearer $access" -d "{\"name\":\"e2e-tfacc-$RUN_ID\"}" "$HOST/api/v1/api-keys")"
+          if [ "$status" != 201 ]; then
+            echo "minting the key answered $status: $(jq -c '{error_code,message}' "$RUNNER_TEMP/body.json" 2>/dev/null || true)"
+            exit 1
+          fi
+          key="$(jq -r .key "$RUNNER_TEMP/body.json")"
+          echo "::add-mask::$key"
+          echo "API_KEY_ID=$(jq -r .key_id "$RUNNER_TEMP/body.json")" >> "$GITHUB_ENV"
+          echo "WEBBPULSE_TF_TOKEN=$key" >> "$GITHUB_ENV"
+          rm -f "$RUNNER_TEMP/body.json"
+
+      - name: Run the acceptance tests
+        env:
+          TF_ACC: "1"
+          WEBBPULSE_TF_HOST: ${{ vars.ACCEPTANCE_HOST }}
+          WEBBPULSE_TF_ACC_VCS_REPO: ${{ vars.ACCEPTANCE_VCS_REPO }}
+          WEBBPULSE_TF_ACC_REGISTRY_PROVIDER: ${{ vars.ACCEPTANCE_REGISTRY_PROVIDER }}
+        run: go test ./internal/provider -run "$TEST_PATTERN" -count=1 -v -timeout 40m
+
+      - name: Revoke the key and delete the user
+        if: always()
+        run: |
+          set -uo pipefail
+          failed=0
+          if [ -n "${API_KEY_ID:-}" ] && [ -n "${SESSION_TOKEN:-}" ]; then
+            status="$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE -H "x-origin-verify: $WEBBPULSE_TF_ACC_GATE_HEADER" -H "authorization: Bearer $SESSION_TOKEN" "$HOST/api/v1/api-keys/$API_KEY_ID")"
+            echo "revoking the key answered $status"
+            [ "$status" = 200 ] || failed=1
+          fi
+          if [ -n "${USER_ID:-}" ] && [ -n "${ADMIN_TOKEN:-}" ]; then
+            status="$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE -H "x-origin-verify: $WEBBPULSE_TF_ACC_GATE_HEADER" -H "authorization: Bearer $ADMIN_TOKEN" "$HOST/api/auth/e2e/users/$USER_ID")"
+            echo "deleting the user answered $status"
+            [ "$status" = 200 ] || failed=1
+          fi
+          exit "$failed"

@@ -24,7 +24,8 @@ const EnvToken = "WEBBPULSE_TF_TOKEN"
 var _ provider.Provider = (*webbpulseProvider)(nil)
 
 type webbpulseProvider struct {
-	version string
+	version       string
+	clientOptions []client.Option
 }
 
 // New returns the provider constructor the plugin server is handed.
@@ -48,7 +49,8 @@ func (p *webbpulseProvider) Metadata(_ context.Context, _ provider.MetadataReque
 // Schema defines the schema of the provider.
 func (p *webbpulseProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manages workspaces and variables in the WebbPulse Terraform control plane.",
+		MarkdownDescription: "Manages workspaces, variables and private registry modules and providers in the WebbPulse " +
+			"Terraform control plane.",
 		Attributes: map[string]schema.Attribute{
 			"host": schema.StringAttribute{
 				Optional: true,
@@ -122,7 +124,8 @@ func (p *webbpulseProvider) Configure(ctx context.Context, req provider.Configur
 		return
 	}
 
-	apiClient, err := client.New(host, token, client.WithUserAgent("terraform-provider-webbpulse/"+p.version))
+	options := append([]client.Option{client.WithUserAgent("terraform-provider-webbpulse/" + p.version)}, p.clientOptions...)
+	apiClient, err := client.New(host, token, options...)
 	if err != nil {
 		resp.Diagnostics.AddError("Cannot build the API client", err.Error())
 		return
@@ -137,6 +140,8 @@ func (p *webbpulseProvider) Resources(_ context.Context) []func() resource.Resou
 	return []func() resource.Resource{
 		NewWorkspaceResource,
 		NewVariableResource,
+		NewRegistryModuleResource,
+		NewRegistryProviderResource,
 	}
 }
 
@@ -146,5 +151,7 @@ func (p *webbpulseProvider) DataSources(_ context.Context) []func() datasource.D
 		NewWorkspaceDataSource,
 		NewWorkspacesDataSource,
 		NewRunRoleCheckDataSource,
+		NewRegistryModuleDataSource,
+		NewRegistryProviderDataSource,
 	}
 }

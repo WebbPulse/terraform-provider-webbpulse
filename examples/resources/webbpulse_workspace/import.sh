@@ -1,0 +1,1 @@
+terraform import webbpulse_workspace.example ws-01JABCDEF0123456789ABCDEF
