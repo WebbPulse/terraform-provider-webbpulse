@@ -14,6 +14,7 @@ func TestWorkspacePatchNullableFields(t *testing.T) {
 	value := "configured"
 	assigned := &value
 	off := false
+	var clearedRoles []string
 	for _, tc := range []struct {
 		name string
 		body WorkspaceUpdate
@@ -23,6 +24,8 @@ func TestWorkspacePatchNullableFields(t *testing.T) {
 		{"cleared", WorkspaceUpdate{RunRoleARN: &cleared, WorkingDirectory: &cleared, Description: &cleared}, `{"run_role_arn":null,"working_directory":null,"description":null}`},
 		{"assigned", WorkspaceUpdate{RunRoleARN: &assigned, WorkingDirectory: &assigned, Description: &assigned}, `{"run_role_arn":"configured","working_directory":"configured","description":"configured"}`},
 		{"vcs disconnected", WorkspaceUpdate{VCSRepo: &cleared, TrackedBranch: &cleared}, `{"vcs_repo":null,"tracked_branch":null}`},
+		{"plan roles cleared", WorkspaceUpdate{PlanAssumeRoleARNs: &clearedRoles}, `{"plan_assume_role_arns":null}`},
+		{"plan roles assigned", WorkspaceUpdate{PlanAssumeRoleARNs: &[]string{"arn:aws:iam::111122223333:role/reader"}}, `{"plan_assume_role_arns":["arn:aws:iam::111122223333:role/reader"]}`},
 		{"vcs settings", WorkspaceUpdate{VCSRepo: &assigned, TriggerPatterns: &[]string{}, SpeculativePlans: &off, FileTriggersEnabled: &off}, `{"vcs_repo":"configured","trigger_patterns":[],"speculative_plans":false,"file_triggers_enabled":false}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

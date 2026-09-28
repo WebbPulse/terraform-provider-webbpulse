@@ -18,6 +18,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -55,6 +56,7 @@ type workspaceModel struct {
 	TriggerPatterns     types.List   `tfsdk:"trigger_patterns"`
 	FileTriggersEnabled types.Bool   `tfsdk:"file_triggers_enabled"`
 	SpeculativeEnabled  types.Bool   `tfsdk:"speculative_enabled"`
+	PlanAssumeRoleARNs  types.Set    `tfsdk:"plan_assume_role_arns"`
 }
 
 func runRoleSetupAttrTypes() map[string]attr.Type {
@@ -144,6 +146,17 @@ func (r *workspaceResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Default:  booldefault.StaticBool(true),
 				MarkdownDescription: "Whether a pull request upload starts a plan only run. Sent to the API as " +
 					"`speculative_plans`. Defaults to `true`.",
+			},
+			"plan_assume_role_arns": schema.SetAttribute{
+				Optional:    true,
+				Computed:    true,
+				ElementType: types.StringType,
+				Default:     setdefault.StaticValue(emptyStringSet()),
+				MarkdownDescription: "Exact IAM role ARNs a plan session may assume beside its read only access, " +
+					"such as a Route 53 reader role in another account. At most 10, each up to 160 characters, " +
+					"with no wildcards. An apply is not limited by this list. Removing it, or setting it to " +
+					"`[]`, sends an explicit null and clears the list.",
+				Validators: planAssumeRoleARNsValidators(),
 			},
 			"description": schema.StringAttribute{
 				Optional:            true,
@@ -288,6 +301,12 @@ func (r *workspaceResource) Create(ctx context.Context, req resource.CreateReque
 	body.TriggerPatterns = patterns
 	body.FileTriggersEnabled = plan.FileTriggersEnabled.ValueBoolPointer()
 	body.SpeculativePlans = plan.SpeculativeEnabled.ValueBoolPointer()
+	arns, arnDiags := setStrings(ctx, plan.PlanAssumeRoleARNs)
+	resp.Diagnostics.Append(arnDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	body.PlanAssumeRoleARNs = arns
 
 	created, err := r.client.CreateWorkspace(ctx, body)
 	if err != nil {
@@ -364,6 +383,9 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 		}
 		body.TriggerPatterns = &patterns
 	}
+	var arnDiags diag.Diagnostics
+	body.PlanAssumeRoleARNs, arnDiags = planAssumeRoleARNsPatch(ctx, plan.PlanAssumeRoleARNs, state.PlanAssumeRoleARNs)
+	resp.Diagnostics.Append(arnDiags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
