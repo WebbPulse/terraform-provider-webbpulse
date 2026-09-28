@@ -1,0 +1,15 @@
+terraform-provider-webbpulse
+Copyright (c) 2026 WebbPulse
+
+The source code in this repository is licensed under the PolyForm Strict
+License 1.0.0 (see LICENSE). No file in this repository is under another
+licence.
+
+Release binaries statically link third-party Go modules listed in go.mod. Each
+keeps its own licence. The HashiCorp modules (github.com/hashicorp/...),
+including terraform-plugin-framework, terraform-plugin-go and go-plugin, are
+under the Mozilla Public License 2.0 (https://mozilla.org/MPL/2.0/), and their
+Source Code Form is available from their upstream repositories at the versions
+pinned in go.mod and go.sum. The remaining modules are under their own
+permissive licences (BSD, MIT, Apache 2.0), which are published with their
+source at the same upstream locations.
