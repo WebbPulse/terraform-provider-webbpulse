@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
@@ -116,91 +117,89 @@ resource "webbpulse_workspace" "test" {
 	})
 }
 
-// TestAccVariable exercises plain and sensitive variables against a live API.
+// TestAccVariable exercises plain, sensitive and HCL variables against a live
+// API, including an HCL list that round-trips, imports and changes in place.
 func TestAccVariable(t *testing.T) {
 	testAccPreCheck(t)
 
 	name := testAccName("variable")
+	const listAddress = "webbpulse_variable.list"
+	config := func(region string, listHCL bool) string {
+		return fmt.Sprintf(`
+resource "webbpulse_workspace" "test" {
+  name           = %q
+  engine_version = "1.9.8"
+}
+
+resource "webbpulse_variable" "plain" {
+  workspace_id = webbpulse_workspace.test.workspace_id
+  key          = "region"
+  value        = %q
+  category     = "terraform"
+}
+
+resource "webbpulse_variable" "secret" {
+  workspace_id = webbpulse_workspace.test.workspace_id
+  key          = "API_TOKEN"
+  value        = "not-a-real-token"
+  category     = "env"
+  sensitive    = true
+}
+
+resource "webbpulse_variable" "list" {
+  workspace_id = webbpulse_workspace.test.workspace_id
+  key          = "regions"
+  value        = jsonencode(["us-west-2", "eu-west-1"])
+  hcl          = %t
+}
+`, name, region, listHCL)
+	}
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: fmt.Sprintf(`
-resource "webbpulse_workspace" "test" {
-  name           = %q
-  engine_version = "1.9.8"
-}
-
-resource "webbpulse_variable" "plain" {
-  workspace_id = webbpulse_workspace.test.workspace_id
-  key          = "region"
-  value        = "us-west-2"
-  category     = "terraform"
-}
-
-resource "webbpulse_variable" "secret" {
-  workspace_id = webbpulse_workspace.test.workspace_id
-  key          = "API_TOKEN"
-  value        = "not-a-real-token"
-  category     = "env"
-  sensitive    = true
-}
-`, name),
+				Config: config("us-west-2", true),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("webbpulse_variable.plain", "value", "us-west-2"),
+					resource.TestCheckResourceAttr("webbpulse_variable.plain", "hcl", "false"),
 					resource.TestCheckResourceAttr("webbpulse_variable.secret", "sensitive", "true"),
 					resource.TestCheckResourceAttr("webbpulse_variable.secret", "category", "env"),
+					resource.TestCheckResourceAttr(listAddress, "hcl", "true"),
+					resource.TestCheckResourceAttr(listAddress, "category", "terraform"),
+					resource.TestCheckResourceAttr(listAddress, "value", `["us-west-2","eu-west-1"]`),
 				),
 			},
 			{
-				Config: fmt.Sprintf(`
-resource "webbpulse_workspace" "test" {
-  name           = %q
-  engine_version = "1.9.8"
-}
-
-resource "webbpulse_variable" "plain" {
-  workspace_id = webbpulse_workspace.test.workspace_id
-  key          = "region"
-  value        = "eu-west-1"
-  category     = "terraform"
-}
-
-resource "webbpulse_variable" "secret" {
-  workspace_id = webbpulse_workspace.test.workspace_id
-  key          = "API_TOKEN"
-  value        = "not-a-real-token"
-  category     = "env"
-  sensitive    = true
-}
-`, name),
-				Check: resource.TestCheckResourceAttr("webbpulse_variable.plain", "value", "eu-west-1"),
+				Config: config("eu-west-1", true),
+				Check:  resource.TestCheckResourceAttr("webbpulse_variable.plain", "value", "eu-west-1"),
 			},
 			{
-				Config: fmt.Sprintf(`
-resource "webbpulse_workspace" "test" {
-  name           = %q
-  engine_version = "1.9.8"
-}
-
-resource "webbpulse_variable" "plain" {
-  workspace_id = webbpulse_workspace.test.workspace_id
-  key          = "region"
-  value        = "eu-west-1"
-  category     = "terraform"
-}
-
-resource "webbpulse_variable" "secret" {
-  workspace_id = webbpulse_workspace.test.workspace_id
-  key          = "API_TOKEN"
-  value        = "not-a-real-token"
-  category     = "env"
-  sensitive    = true
-}
-`, name),
+				Config:             config("eu-west-1", true),
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: false,
+			},
+			{
+				ResourceName:                         listAddress,
+				ImportState:                          true,
+				ImportStateVerify:                    true,
+				ImportStateVerifyIdentifierAttribute: "key",
+				ImportStateIdFunc: func(state *terraform.State) (string, error) {
+					rs, ok := state.RootModule().Resources[listAddress]
+					if !ok {
+						return "", fmt.Errorf("the list variable is not in state")
+					}
+					return rs.Primary.Attributes["workspace_id"] + "/" + rs.Primary.Attributes["key"], nil
+				},
+			},
+			{
+				Config: config("eu-west-1", false),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(listAddress, plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.TestCheckResourceAttr(listAddress, "hcl", "false"),
 			},
 		},
 	})

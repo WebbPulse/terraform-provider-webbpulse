@@ -19,7 +19,7 @@ terraform {
   required_providers {
     webbpulse = {
       source  = "staging.terraform.webbpulse.com/WebbPulse/webbpulse"
-      version = "0.2.0-rc.2"
+      version = "0.2.0-rc.3"
     }
   }
 }
@@ -150,6 +150,13 @@ Creates, reads, updates and deletes one variable. Imports by
 `category` is `terraform` for a `-var` on the command line or `env` for a
 process environment variable on the task. `value` is marked sensitive at the
 schema level whatever `sensitive` is set to.
+
+`hcl` (default `false`) sends `value` as an HCL expression, which is how a list
+or map input is set, for example `value = jsonencode(["a", "b"])` with
+`hcl = true`. Only a `terraform` variable can be HCL; the API refuses an `env`
+one and an expression that cannot parse, with a 422. `hcl` round-trips on read
+and import, and changing it updates the variable in place, since the PUT route
+rewrites it.
 
 The API never returns a sensitive value, on any route. The provider therefore
 keeps the configured value in state and does not overwrite it with the null the
@@ -309,9 +316,6 @@ gpg --verify terraform-provider-webbpulse_<version>_SHA256SUMS.sig \
 - An `origin_verify_ssm_parameter` attribute that reads the gate value from SSM
   through the AWS SDK default chain, if the Platform factory wants the provider
   to resolve it rather than its pipeline.
-
-- An `hcl` flag on `webbpulse_variable`, once the API ships it
-  (WebbPulse-Terraform PR 67, not merged yet).
 - No runs resource or data source. `POST /workspaces/{id}/config-versions`
   exists, but the runs domain is not wrapped here yet, so a run cannot be
   queued from Terraform.
