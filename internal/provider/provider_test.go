@@ -44,6 +44,14 @@ func TestProviderSchemaMarksTheTokenSensitive(t *testing.T) {
 		t.Error("origin_verify is required, but it is optional with an environment variable fallback")
 	}
 
+	parameter, ok := resp.Schema.Attributes["origin_verify_ssm_parameter"].(providerschema.StringAttribute)
+	if !ok {
+		t.Fatal("origin_verify_ssm_parameter is not a string attribute")
+	}
+	if !parameter.Optional || parameter.Required {
+		t.Error("origin_verify_ssm_parameter is not optional")
+	}
+
 	host, ok := resp.Schema.Attributes["host"].(providerschema.StringAttribute)
 	if !ok {
 		t.Fatal("host is not a string attribute")

@@ -37,6 +37,11 @@ func (g *gateRecorder) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 func runGateLifecycle(t *testing.T, providerExtra string) *gateRecorder {
 	t.Helper()
+	return runGateLifecycleWithCheck(t, providerExtra, nil)
+}
+
+func runGateLifecycleWithCheck(t *testing.T, providerExtra string, check resource.TestCheckFunc) *gateRecorder {
+	t.Helper()
 	recorder := &gateRecorder{
 		workspace: &fakeWorkspaceAPI{workspaces: map[string]map[string]any{}},
 		registry:  newFakeRegistryAPI(),
@@ -67,7 +72,7 @@ resource "webbpulse_registry_module" "test" {
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
-		Steps:                    []resource.TestStep{{Config: config}},
+		Steps:                    []resource.TestStep{{Config: config, Check: check}},
 	})
 
 	recorder.mu.Lock()

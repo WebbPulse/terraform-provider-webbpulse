@@ -4,6 +4,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"github.com/WebbPulse/terraform-provider-webbpulse/internal/client"
@@ -29,6 +30,7 @@ var _ provider.Provider = (*webbpulseProvider)(nil)
 type webbpulseProvider struct {
 	version       string
 	clientOptions []client.Option
+	readSSM       ssmParameterReader
 }
 
 // New returns the provider constructor the plugin server is handed.
@@ -42,6 +44,8 @@ type providerModel struct {
 	Host         types.String `tfsdk:"host"`
 	Token        types.String `tfsdk:"token"`
 	OriginVerify types.String `tfsdk:"origin_verify"`
+
+	OriginVerifySSMParameter types.String `tfsdk:"origin_verify_ssm_parameter"`
 }
 
 // Metadata sets the provider type name and version.
@@ -75,7 +79,18 @@ func (p *webbpulseProvider) Schema(_ context.Context, _ provider.SchemaRequest, 
 				MarkdownDescription: "The edge access gate value, sent as the `" + client.OriginVerifyHeader + "` " +
 					"header on every API request. Needed when the control plane sits behind the access gate, which " +
 					"otherwise answers 403. Falls back to the `" + EnvOriginVerify + "` environment variable. Left " +
-					"unset, no header is sent.",
+					"unset, the value is read from `origin_verify_ssm_parameter` when that is set, and otherwise no " +
+					"header is sent.",
+			},
+			"origin_verify_ssm_parameter": schema.StringAttribute{
+				Optional: true,
+				MarkdownDescription: "The name or ARN of the SSM parameter holding the edge access gate value, such as " +
+					"`/webbpulse-terraform-prod/access-gate/origin-verify`. The provider reads it with decryption " +
+					"using the ambient AWS credentials and region (an ARN is read in its own region) and keeps the " +
+					"value in memory only, never in state or logs. Used only when no direct value is given: " +
+					"`origin_verify` or `" + EnvOriginVerify + "` wins when set. Falls back to the `" +
+					EnvOriginVerifySSMParameter + "` environment variable. The credentials need `ssm:GetParameter` " +
+					"on the parameter and `kms:Decrypt` on its key.",
 			},
 		},
 	}
@@ -113,6 +128,14 @@ func (p *webbpulseProvider) Configure(ctx context.Context, req provider.Configur
 				"supply it through the "+EnvOriginVerify+" environment variable.",
 		)
 	}
+	if config.OriginVerifySSMParameter.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("origin_verify_ssm_parameter"),
+			"Origin verify SSM parameter is not known at configure time",
+			"The provider cannot read the access gate value from an unknown parameter. Set it to a literal value, "+
+				"or supply it through the "+EnvOriginVerifySSMParameter+" environment variable.",
+		)
+	}
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -128,6 +151,10 @@ func (p *webbpulseProvider) Configure(ctx context.Context, req provider.Configur
 	originVerify := os.Getenv(EnvOriginVerify)
 	if !config.OriginVerify.IsNull() {
 		originVerify = config.OriginVerify.ValueString()
+	}
+	originVerifyParameter := os.Getenv(EnvOriginVerifySSMParameter)
+	if !config.OriginVerifySSMParameter.IsNull() {
+		originVerifyParameter = config.OriginVerifySSMParameter.ValueString()
 	}
 
 	if host == "" {
@@ -146,6 +173,23 @@ func (p *webbpulseProvider) Configure(ctx context.Context, req provider.Configur
 	}
 	if resp.Diagnostics.HasError() {
 		return
+	}
+
+	if originVerify == "" && originVerifyParameter != "" {
+		readSSM := p.readSSM
+		if readSSM == nil {
+			readSSM = readSSMParameter
+		}
+		value, err := readSSM(ctx, originVerifyParameter)
+		if err != nil {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("origin_verify_ssm_parameter"),
+				"Cannot read the access gate value from SSM",
+				fmt.Sprintf("Reading SSM parameter %q with decryption failed: %v", originVerifyParameter, err),
+			)
+			return
+		}
+		originVerify = value
 	}
 
 	options := []client.Option{client.WithUserAgent("terraform-provider-webbpulse/" + p.version)}
