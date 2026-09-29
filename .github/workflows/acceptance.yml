@@ -121,6 +121,7 @@ jobs:
           WEBBPULSE_TF_HOST: ${{ vars.ACCEPTANCE_HOST }}
           WEBBPULSE_TF_ACC_VCS_REPO: ${{ vars.ACCEPTANCE_VCS_REPO }}
           WEBBPULSE_TF_ACC_REGISTRY_PROVIDER: ${{ vars.ACCEPTANCE_REGISTRY_PROVIDER }}
+          WEBBPULSE_TF_ACC_GATE_PARAMETER: ${{ vars.ACCEPTANCE_GATE_PARAMETER }}
         run: go test ./internal/provider -run "$TEST_PATTERN" -count=1 -v -timeout 40m
 
       - name: Revoke the key and delete the user

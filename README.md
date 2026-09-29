@@ -19,7 +19,7 @@ terraform {
   required_providers {
     webbpulse = {
       source  = "staging.terraform.webbpulse.com/WebbPulse/webbpulse"
-      version = "0.2.0-rc.4"
+      version = "0.2.0-rc.5"
     }
   }
 }
@@ -42,6 +42,7 @@ provider "webbpulse" {
 | `host` | `WEBBPULSE_TF_HOST` | Base URL. The `/api/v1` suffix is added when absent. Required, no default. |
 | `token` | `WEBBPULSE_TF_TOKEN` | A bearer token: an agent API key (`wpk_` prefix) or a user JWT. Marked sensitive. |
 | `origin_verify` | `WEBBPULSE_TF_ORIGIN_VERIFY` | The edge access gate value, sent as `x-origin-verify` on every API request. Optional and marked sensitive; unset sends no header. |
+| `origin_verify_ssm_parameter` | `WEBBPULSE_TF_ORIGIN_VERIFY_SSM_PARAMETER` | Name or ARN of the SSM parameter holding the gate value. Read with decryption using the ambient AWS credentials when no direct `origin_verify` value is set. |
 
 Set the token through the environment rather than in a configuration file, so
 it stays out of version control and out of the state file.
@@ -49,9 +50,20 @@ it stays out of version control and out of the state file.
 Staging and production sit behind an edge access gate: API Gateway answers 403
 to any request without the `x-origin-verify` header or a gate cookie, so a
 provider driven by a `wpk_` key needs `origin_verify`. The value lives in the
-environment's SSM parameter held by the gate module; resolve it in the calling
-pipeline (for example `aws ssm get-parameter --with-decryption`, masked) and
-pass it through `WEBBPULSE_TF_ORIGIN_VERIFY`. The provider never logs it.
+environment's SSM parameter held by the gate module. Either name that
+parameter in `origin_verify_ssm_parameter` (or
+`WEBBPULSE_TF_ORIGIN_VERIFY_SSM_PARAMETER`) and let the provider read it, or
+resolve it in the calling pipeline and pass it through `origin_verify` or
+`WEBBPULSE_TF_ORIGIN_VERIFY`.
+
+The provider reads the parameter once per configure with `ssm:GetParameter`
+and decryption, using the ambient AWS credential chain and region (environment,
+shared profile, container or instance role); a parameter named by its full ARN
+is read in the ARN's region. The credentials also need `kms:Decrypt` on the
+parameter's key. A direct value, from the attribute or its environment
+variable, wins and the parameter is then never read. A failed read is an error
+naming the parameter, never a silent fallback to no header. The value is held
+in memory only: it is not written to state, plan output or logs.
 
 ## Resources
 
