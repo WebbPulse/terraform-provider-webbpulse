@@ -39,6 +39,7 @@ resource "webbpulse_workspace" "example" {
 
 ### Optional
 
+- `auto_apply` (Boolean) Whether a run whose plan has changes applies without a confirmation, like HCP Terraform's auto-apply. Plan only and pull request runs never apply. Changing it needs a token with `admin`. Defaults to `false`.
 - `description` (String) A description for this workspace.
 - `engine` (String) Which binary runs this workspace, `terraform` or `tofu`.
 - `file_triggers_enabled` (Boolean) Whether uploads are filtered by changed paths against `working_directory` and `trigger_patterns`. `false` starts a run for every push to the tracked branch. Defaults to `true`.

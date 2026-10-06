@@ -57,6 +57,7 @@ type workspaceModel struct {
 	FileTriggersEnabled types.Bool   `tfsdk:"file_triggers_enabled"`
 	SpeculativeEnabled  types.Bool   `tfsdk:"speculative_enabled"`
 	PlanAssumeRoleARNs  types.Set    `tfsdk:"plan_assume_role_arns"`
+	AutoApply           types.Bool   `tfsdk:"auto_apply"`
 }
 
 func runRoleSetupAttrTypes() map[string]attr.Type {
@@ -146,6 +147,14 @@ func (r *workspaceResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Default:  booldefault.StaticBool(true),
 				MarkdownDescription: "Whether a pull request upload starts a plan only run. Sent to the API as " +
 					"`speculative_plans`. Defaults to `true`.",
+			},
+			"auto_apply": schema.BoolAttribute{
+				Optional: true,
+				Computed: true,
+				Default:  booldefault.StaticBool(false),
+				MarkdownDescription: "Whether a run whose plan has changes applies without a confirmation, like HCP " +
+					"Terraform's auto-apply. Plan only and pull request runs never apply. Changing it needs a token " +
+					"with `admin`. Defaults to `false`.",
 			},
 			"plan_assume_role_arns": schema.SetAttribute{
 				Optional:    true,
@@ -301,6 +310,9 @@ func (r *workspaceResource) Create(ctx context.Context, req resource.CreateReque
 	body.TriggerPatterns = patterns
 	body.FileTriggersEnabled = plan.FileTriggersEnabled.ValueBoolPointer()
 	body.SpeculativePlans = plan.SpeculativeEnabled.ValueBoolPointer()
+	if plan.AutoApply.ValueBool() {
+		body.AutoApply = plan.AutoApply.ValueBoolPointer()
+	}
 	arns, arnDiags := setStrings(ctx, plan.PlanAssumeRoleARNs)
 	resp.Diagnostics.Append(arnDiags...)
 	if resp.Diagnostics.HasError() {
@@ -371,6 +383,7 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 		Description:         clearablePatch(plan.Description, state.Description),
 		FileTriggersEnabled: changedBool(plan.FileTriggersEnabled, state.FileTriggersEnabled),
 		SpeculativePlans:    changedBool(plan.SpeculativeEnabled, state.SpeculativeEnabled),
+		AutoApply:           changedBool(plan.AutoApply, state.AutoApply),
 	}
 	var vcsDiags diag.Diagnostics
 	body.VCSRepo, body.TrackedBranch, vcsDiags = vcsPatch(ctx, plan.VCSRepo, state.VCSRepo)
