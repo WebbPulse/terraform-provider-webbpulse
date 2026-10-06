@@ -28,6 +28,7 @@ data "webbpulse_workspace" "example" {
 
 ### Read-Only
 
+- `auto_apply` (Boolean) Whether a run whose plan has changes applies without a confirmation.
 - `created_at` (String) When the workspace was created.
 - `description` (String) The workspace description.
 - `engine` (String) Which binary runs this workspace.

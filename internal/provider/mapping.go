@@ -44,6 +44,7 @@ func applyWorkspace(ctx context.Context, from *client.Workspace, into *workspace
 	into.FileTriggersEnabled = boolOrTrue(from.FileTriggersEnabled)
 	into.SpeculativeEnabled = boolOrTrue(from.SpeculativePlans)
 	into.PlanAssumeRoleARNs = arns
+	into.AutoApply = types.BoolValue(from.AutoApply != nil && *from.AutoApply)
 	return diags
 }
 

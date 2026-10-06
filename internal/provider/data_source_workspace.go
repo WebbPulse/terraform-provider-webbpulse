@@ -40,6 +40,7 @@ type workspaceDataModel struct {
 	TriggerPatterns     types.List   `tfsdk:"trigger_patterns"`
 	FileTriggersEnabled types.Bool   `tfsdk:"file_triggers_enabled"`
 	SpeculativeEnabled  types.Bool   `tfsdk:"speculative_enabled"`
+	AutoApply           types.Bool   `tfsdk:"auto_apply"`
 	PlanAssumeRoleARNs  types.Set    `tfsdk:"plan_assume_role_arns"`
 }
 
@@ -62,6 +63,7 @@ func workspaceDataFrom(m workspaceModel) *workspaceDataModel {
 		TriggerPatterns:     m.TriggerPatterns,
 		FileTriggersEnabled: m.FileTriggersEnabled,
 		SpeculativeEnabled:  m.SpeculativeEnabled,
+		AutoApply:           m.AutoApply,
 		PlanAssumeRoleARNs:  m.PlanAssumeRoleARNs,
 	}
 }
@@ -115,6 +117,10 @@ func (d *workspaceDataSource) Schema(_ context.Context, _ datasource.SchemaReque
 			"speculative_enabled": schema.BoolAttribute{
 				Computed:            true,
 				MarkdownDescription: "Whether a pull request upload starts a plan only run.",
+			},
+			"auto_apply": schema.BoolAttribute{
+				Computed:            true,
+				MarkdownDescription: "Whether a run whose plan has changes applies without a confirmation.",
 			},
 			"plan_assume_role_arns": schema.SetAttribute{
 				Computed:            true,

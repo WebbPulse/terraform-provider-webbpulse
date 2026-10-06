@@ -68,6 +68,7 @@ func baseWorkspaceModel(t *testing.T) workspaceModel {
 		TriggerPatterns:     stringList(t),
 		FileTriggersEnabled: types.BoolValue(true),
 		SpeculativeEnabled:  types.BoolValue(true),
+		AutoApply:           types.BoolValue(false),
 	}
 }
 
@@ -154,6 +155,23 @@ func TestWorkspaceVCSUpdatePatch(t *testing.T) {
 			prior: func(m *workspaceModel) { m.TriggerPatterns = stringList(t, "*.tf") },
 			plan:  func(m *workspaceModel) { m.TriggerPatterns = stringList(t) },
 			want:  `{"trigger_patterns":[]}`,
+		},
+		{
+			name:     "turn auto-apply on",
+			plan:     func(m *workspaceModel) { m.AutoApply = types.BoolValue(true) },
+			want:     `{"auto_apply":true}`,
+			response: client.Workspace{AutoApply: boolPtr(true)},
+			check: func(t *testing.T, m workspaceModel) {
+				if !m.AutoApply.ValueBool() {
+					t.Error("auto_apply did not follow the response")
+				}
+			},
+		},
+		{
+			name:  "turn auto-apply off",
+			prior: func(m *workspaceModel) { m.AutoApply = types.BoolValue(true) },
+			plan:  func(m *workspaceModel) { m.AutoApply = types.BoolValue(false) },
+			want:  `{"auto_apply":false}`,
 		},
 		{
 			name: "turn both flags off",
