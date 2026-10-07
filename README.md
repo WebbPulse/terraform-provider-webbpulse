@@ -322,6 +322,21 @@ Environment variables on this repository: `SIGNING_KEY_ROLE_ARN` and
 `SIGNING_KEY_SECRET_ID` on all four environments, plus
 `SIGNING_KEY_PARAMETER_PREFIX` on the two `-signing-key` ones.
 
+After a version publishes, refresh the lock file of every root that pins it, with
+hashes taken from the registry rather than from the GitHub release assets:
+
+```sh
+terraform login terraform.webbpulse.com
+terraform providers lock -platform=linux_amd64 -platform=darwin_arm64
+```
+
+Use `staging.terraform.webbpulse.com` for a prerelease. `terraform login` stores a
+`registry:read` key in `~/.terraform.d/credentials.tfrc.json`. A `wp-tf login`
+access token in `TF_TOKEN_terraform_webbpulse_com` also works, but it expires
+within the hour. The lock records an `h1:` hash per platform and the `zh:` hashes
+from the registry's signed `SHA256SUMS`. Commit `.terraform.lock.hcl` with the
+version bump.
+
 To check a release by hand:
 
 ```sh
