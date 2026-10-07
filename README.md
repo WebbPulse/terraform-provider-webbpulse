@@ -1,9 +1,10 @@
 # terraform-provider-webbpulse
 
 Terraform provider for the WebbPulse Terraform control plane. It manages
-workspaces and their variables, private registry modules and providers, and
-reads a workspace's run role check. Per resource reference lives in `docs/`,
-generated with `tfplugindocs generate` from the schema and `examples/`.
+workspaces with their variables and run notifications, private registry
+modules and providers, and reads a workspace's run role check. Per resource
+reference lives in `docs/`, generated with `tfplugindocs generate` from the
+schema and `examples/`.
 
 Built on the HashiCorp Terraform Plugin Framework v1.19.0, protocol 6.
 
@@ -192,6 +193,37 @@ normal CLI output; it does not encrypt state. Protect the state backend accordin
 terraform import webbpulse_variable.example ws-01JABCDEF0123456789ABCDEF/region
 ```
 
+### `webbpulse_notification_configuration`
+
+Creates, reads, updates and deletes one run notification configuration, like
+`tfe_notification_configuration`. Imports by `<workspace_id>/<notification_id>`.
+
+`destination_type` is `slack` (an incoming webhook on `hooks.slack.com`),
+`discord` (a channel webhook on `discord.com`) or `generic` (any HTTPS URL,
+which receives HCP Terraform's version 1 payload). `triggers` is a set of
+`run:created`, `run:planning`, `run:needs_attention`, `run:applying`,
+`run:completed` and `run:errored` (default `[]`), and `enabled` defaults to
+`true`. Only a `generic` destination takes `token`, which signs each body into
+`X-TFE-Notification-Signature`; a token on another destination fails validation.
+
+`url` and `token` are sensitive and write only. The API never returns them, so
+the provider keeps the configured values in state, as with a sensitive
+variable, and a URL or token changed outside Terraform is not detected. The
+computed `url_masked` shows the scheme and host and `has_token` whether a token
+is set. Updates send only the changed attributes; a change of
+`destination_type` resends `url`, which the API requires, and removing `token`
+sends an explicit null, which clears it. An imported configuration has no `url`
+or `token` in state, so the first apply after an import writes the configured
+values.
+
+Writes need `workspaces:write` and a recent login, which a `wpk_` key passes. A
+workspace holds at most 50 configurations (a 409), and a refused field is a 422
+whose message never quotes the URL.
+
+```sh
+terraform import webbpulse_notification_configuration.slack ws-01JABCDEF0123456789ABCDEF/nc-01JABCDEF0123456789ABCDEFG
+```
+
 ### `webbpulse_registry_module`
 
 Connects a GitHub repository the environment's GitHub App sees as a private
@@ -259,7 +291,8 @@ naming `run_role_arn`.
 ## Errors
 
 The client keeps the API's own error envelope. A 404 on a resource read removes
-the resource from state, so a workspace or variable deleted outside Terraform is
+the resource from state, so a workspace, variable or notification configuration deleted outside
+Terraform is
 planned for re-creation; every other status becomes a diagnostic carrying the API's
 `message`, its `error_code` and the request id, so a failure can be traced back
 to one request in the control plane's logs.

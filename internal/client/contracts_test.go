@@ -71,3 +71,55 @@ func TestErrorBodiesDoNotExposeSubmittedValues(t *testing.T) {
 		}
 	}
 }
+
+// TestNotificationUpdateFields distinguishes omission, clearing, and assignment
+// on the wire, and checks no notification write echoes the URL in an error.
+func TestNotificationUpdateFields(t *testing.T) {
+	var cleared *string
+	token := "synthetic-token"
+	assigned := &token
+	off := false
+	for _, tc := range []struct {
+		name string
+		body NotificationConfigurationUpdate
+		want string
+	}{
+		{"omitted", NotificationConfigurationUpdate{}, `{}`},
+		{"token cleared", NotificationConfigurationUpdate{Token: &cleared}, `{"token":null}`},
+		{"token assigned", NotificationConfigurationUpdate{Token: &assigned}, `{"token":"synthetic-token"}`},
+		{"triggers emptied", NotificationConfigurationUpdate{Triggers: &[]string{}}, `{"triggers":[]}`},
+		{"disabled", NotificationConfigurationUpdate{Enabled: &off}, `{"enabled":false}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPatch || r.URL.Path != "/api/v1/workspaces/ws-test/notification-configurations/nc-test" {
+					t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+				}
+				var body json.RawMessage
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+				}
+				if string(body) != tc.want {
+					t.Errorf("body = %s, want %s", body, tc.want)
+				}
+				_, _ = w.Write([]byte(`{"id":"nc-test","workspace_id":"ws-test"}`))
+			}))
+			if _, err := c.UpdateNotificationConfiguration(context.Background(), "ws-test", "nc-test", tc.body); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+
+	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"detail":[{"loc":["body","url"],"input":"https://hooks.slack.com/services/synthetic-secret","msg":"bad"}]}`))
+	}))
+	_, err := c.CreateNotificationConfiguration(context.Background(), "ws-test", NotificationConfigurationCreate{
+		Name:            "alerts",
+		DestinationType: DestinationSlack,
+		URL:             "https://hooks.slack.com/services/synthetic-secret",
+	})
+	if err == nil || strings.Contains(err.Error(), "synthetic-secret") || !strings.Contains(err.Error(), "422") {
+		t.Fatalf("expected a 422 diagnostic without the URL, got %v", err)
+	}
+}

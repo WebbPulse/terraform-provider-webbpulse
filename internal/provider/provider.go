@@ -212,6 +212,7 @@ func (p *webbpulseProvider) Resources(_ context.Context) []func() resource.Resou
 	return []func() resource.Resource{
 		NewWorkspaceResource,
 		NewVariableResource,
+		NewNotificationConfigurationResource,
 		NewRegistryModuleResource,
 		NewRegistryProviderResource,
 	}

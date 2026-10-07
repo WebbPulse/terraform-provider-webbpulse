@@ -1,0 +1,1 @@
+terraform import webbpulse_notification_configuration.slack ws-01JABCDEF0123456789ABCDEF/nc-01JABCDEF0123456789ABCDEFG
