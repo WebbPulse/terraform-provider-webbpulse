@@ -287,7 +287,7 @@ func TestNotificationConfigurationTokenNeedsGeneric(t *testing.T) {
 			Triggers:        notificationTriggerSet(),
 		})
 		resp := resource.ValidateConfigResponse{}
-		r.ValidateConfig(ctx, resource.ValidateConfigRequest{Config: tfsdk.Config{Schema: state.Schema, Raw: state.Raw}}, &resp)
+		r.ValidateConfig(ctx, resource.ValidateConfigRequest{Config: tfsdk.Config(state)}, &resp)
 		if resp.Diagnostics.HasError() != tc.wantError {
 			t.Errorf("%s with token %v: error = %v, want %v", tc.destination, tc.token, resp.Diagnostics.HasError(), tc.wantError)
 		}
