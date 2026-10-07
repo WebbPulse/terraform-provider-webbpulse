@@ -128,10 +128,11 @@ func TestResourceTypeNames(t *testing.T) {
 	t.Parallel()
 
 	want := map[string]bool{
-		"webbpulse_workspace":         false,
-		"webbpulse_variable":          false,
-		"webbpulse_registry_module":   false,
-		"webbpulse_registry_provider": false,
+		"webbpulse_workspace":                  false,
+		"webbpulse_variable":                   false,
+		"webbpulse_notification_configuration": false,
+		"webbpulse_registry_module":            false,
+		"webbpulse_registry_provider":          false,
 	}
 
 	for _, newResource := range New("test")().(interface {
@@ -166,6 +167,24 @@ func TestVariableValueIsSensitive(t *testing.T) {
 	}
 	if !value.Sensitive {
 		t.Error("the variable value is not marked sensitive")
+	}
+}
+
+// TestNotificationSecretsAreSensitive checks the notification URL and token are always marked sensitive.
+func TestNotificationSecretsAreSensitive(t *testing.T) {
+	t.Parallel()
+
+	resp := &resource.SchemaResponse{}
+	NewNotificationConfigurationResource().Schema(context.Background(), resource.SchemaRequest{}, resp)
+
+	for _, name := range []string{"url", "token"} {
+		attribute, ok := resp.Schema.Attributes[name].(resourceschema.StringAttribute)
+		if !ok {
+			t.Fatalf("%s is not a string attribute", name)
+		}
+		if !attribute.Sensitive {
+			t.Errorf("the notification %s is not marked sensitive", name)
+		}
 	}
 }
 
