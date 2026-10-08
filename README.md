@@ -367,7 +367,30 @@ publishes a GitHub release in the Terraform registry layout: one
 (protocol 6.0). A prerelease tag (`v0.1.0-rc.1`) signs with the staging key in
 the `staging` environment and is marked a prerelease; a plain tag signs with the
 production key in the `production` environment. The workflow checks the
-signature and the sums before it finishes.
+signature and the sums before it finishes, and keeps the zips, sums and manifest
+as the `provider-build-<tag>` run artifact for 90 days.
+
+Release rules:
+
+- Only repository admins can create, move or delete `v*` tags (the
+  `release-tags` tag ruleset).
+- The tag must point at a commit on `main`. The workflow checks this before it
+  touches the signing key and fails otherwise, so merge first, then tag the
+  merge commit.
+- GoReleaser is pinned to an exact version in `release.yml`.
+
+To publish a prerelease to the production registry, dispatch `release.yml` from
+`main` with the tag and `environment: production`. It does not rebuild: it
+downloads the tag run's build artifact, checks that its `SHA256SUMS` is
+byte-identical to the GitHub release's, re-signs those sums with the target
+key and uploads the same zips. Registry and GitHub release hashes therefore
+match. A tag pushed before this rule has no artifact and cannot be promoted;
+cut a new tag.
+
+```sh
+git tag v0.2.0-rc.7 origin/main && git push origin v0.2.0-rc.7
+gh workflow run release.yml --ref main -f tag=v0.2.0-rc.7 -f environment=production
+```
 
 Each environment has its own RSA 4096 signing key, generated once in CI by the
 `signing-key` workflow (manual dispatch, run in the `<env>-signing-key`
@@ -387,7 +410,7 @@ Environment variables on this repository: `SIGNING_KEY_ROLE_ARN` and
 `SIGNING_KEY_PARAMETER_PREFIX` on the two `-signing-key` ones.
 
 After a version publishes, refresh the lock file of every root that pins it, with
-hashes taken from the registry rather than from the GitHub release assets:
+hashes taken from the registry:
 
 ```sh
 terraform login terraform.webbpulse.com
