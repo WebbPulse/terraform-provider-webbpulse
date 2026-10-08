@@ -42,6 +42,7 @@ type workspaceDataModel struct {
 	SpeculativeEnabled  types.Bool   `tfsdk:"speculative_enabled"`
 	AutoApply           types.Bool   `tfsdk:"auto_apply"`
 	PlanAssumeRoleARNs  types.Set    `tfsdk:"plan_assume_role_arns"`
+	PlanSecretARNs      types.Set    `tfsdk:"plan_secret_arns"`
 	ProjectID           types.String `tfsdk:"project_id"`
 }
 
@@ -66,6 +67,7 @@ func workspaceDataFrom(m workspaceModel) *workspaceDataModel {
 		SpeculativeEnabled:  m.SpeculativeEnabled,
 		AutoApply:           m.AutoApply,
 		PlanAssumeRoleARNs:  m.PlanAssumeRoleARNs,
+		PlanSecretARNs:      m.PlanSecretARNs,
 		ProjectID:           m.ProjectID,
 	}
 }
@@ -132,6 +134,11 @@ func (d *workspaceDataSource) Schema(_ context.Context, _ datasource.SchemaReque
 				Computed:            true,
 				ElementType:         types.StringType,
 				MarkdownDescription: "Exact IAM role ARNs a plan session may assume beside its read only access.",
+			},
+			"plan_secret_arns": schema.SetAttribute{
+				Computed:            true,
+				ElementType:         types.StringType,
+				MarkdownDescription: "Secrets Manager ARN patterns whose values a plan session may read.",
 			},
 			"vcs_repo": schema.SingleNestedAttribute{
 				Computed:            true,

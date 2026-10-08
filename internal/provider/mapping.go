@@ -21,8 +21,10 @@ func applyWorkspace(ctx context.Context, from *client.Workspace, into *workspace
 	diags.Append(vcsDiags...)
 	patterns, patternDiags := triggerPatternsList(ctx, from.TriggerPatterns)
 	diags.Append(patternDiags...)
-	arns, arnDiags := planAssumeRoleARNsSet(ctx, from.PlanAssumeRoleARNs)
+	arns, arnDiags := stringSetFromAPI(ctx, from.PlanAssumeRoleARNs)
 	diags.Append(arnDiags...)
+	secretARNs, secretDiags := stringSetFromAPI(ctx, from.PlanSecretARNs)
+	diags.Append(secretDiags...)
 	if diags.HasError() {
 		return diags
 	}
@@ -44,6 +46,7 @@ func applyWorkspace(ctx context.Context, from *client.Workspace, into *workspace
 	into.FileTriggersEnabled = boolOrTrue(from.FileTriggersEnabled)
 	into.SpeculativeEnabled = boolOrTrue(from.SpeculativePlans)
 	into.PlanAssumeRoleARNs = arns
+	into.PlanSecretARNs = secretARNs
 	into.AutoApply = types.BoolValue(from.AutoApply != nil && *from.AutoApply)
 	into.ProjectID = types.StringValue(projectIDOrDefault(from.ProjectID))
 	return diags

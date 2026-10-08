@@ -14,12 +14,33 @@ import (
 )
 
 const (
+	planSecretARNsMax             = 10
+	planSecretARNMaxLength        = 200
+	planSecretARNPatternValue     = `^arn:aws:secretsmanager:(\*|[a-z]{2}(-[a-z]+)+-[0-9]):[0-9]{12}:secret:[A-Za-z0-9/_+=.@*?-]+$`
 	planAssumeRoleARNsMax         = 10
 	planAssumeRoleARNMaxLength    = 160
 	planAssumeRoleARNPatternValue = `^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$`
 )
 
 var planAssumeRoleARNPattern = regexp.MustCompile(planAssumeRoleARNPatternValue)
+
+var planSecretARNPattern = regexp.MustCompile(planSecretARNPatternValue)
+
+// planSecretARNsValidators mirror the API's limits on plan_secret_arns: at most
+// ten Secrets Manager ARN patterns of up to 200 characters, each pinned to one
+// account, with wildcards allowed in the region and the name.
+func planSecretARNsValidators() []validator.Set {
+	return []validator.Set{
+		setvalidator.SizeAtMost(planSecretARNsMax),
+		setvalidator.ValueStringsAre(
+			stringvalidator.LengthAtMost(planSecretARNMaxLength),
+			stringvalidator.RegexMatches(
+				planSecretARNPattern,
+				"must be a Secrets Manager ARN pattern, arn:aws:secretsmanager:<region or *>:<12 digit account id>:secret:<name pattern>",
+			),
+		),
+	}
+}
 
 // planAssumeRoleARNsValidators mirror the API's limits on plan_assume_role_arns:
 // at most ten exact IAM role ARNs of up to 160 characters, no wildcards.
@@ -38,7 +59,7 @@ func planAssumeRoleARNsValidators() []validator.Set {
 
 // planAssumeRoleARNsSet renders the API's list as a set, empty when the API
 // returns null or omits the field.
-func planAssumeRoleARNsSet(ctx context.Context, arns []string) (types.Set, diag.Diagnostics) {
+func stringSetFromAPI(ctx context.Context, arns []string) (types.Set, diag.Diagnostics) {
 	if arns == nil {
 		arns = []string{}
 	}
@@ -61,7 +82,7 @@ func setStrings(ctx context.Context, set types.Set) ([]string, diag.Diagnostics)
 // nil, so the key is omitted, when nothing changed, a pointer to a nil slice,
 // which encodes as an explicit JSON null, when the set is empty or removed, and
 // the full replacement list otherwise.
-func planAssumeRoleARNsPatch(ctx context.Context, plan, state types.Set) (*[]string, diag.Diagnostics) {
+func stringSetPatch(ctx context.Context, plan, state types.Set) (*[]string, diag.Diagnostics) {
 	if plan.IsUnknown() || plan.Equal(state) {
 		return nil, nil
 	}

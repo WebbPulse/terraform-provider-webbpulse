@@ -58,6 +58,9 @@ func fillWorkspaceNulls(m *workspaceModel) {
 	if m.PlanAssumeRoleARNs.ElementType(ctx) == nil {
 		m.PlanAssumeRoleARNs = types.SetNull(types.StringType)
 	}
+	if m.PlanSecretARNs.ElementType(ctx) == nil {
+		m.PlanSecretARNs = types.SetNull(types.StringType)
+	}
 }
 
 // TestWorkspaceUpdateMergePatch checks the PATCH body carries only changed
