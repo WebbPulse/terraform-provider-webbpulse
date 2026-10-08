@@ -128,12 +128,13 @@ func TestResourceTypeNames(t *testing.T) {
 	t.Parallel()
 
 	want := map[string]bool{
-		"webbpulse_workspace":                  false,
-		"webbpulse_variable":                   false,
-		"webbpulse_notification_configuration": false,
-		"webbpulse_project":                    false,
-		"webbpulse_registry_module":            false,
-		"webbpulse_registry_provider":          false,
+		"webbpulse_workspace":                      false,
+		"webbpulse_variable":                       false,
+		"webbpulse_notification_configuration":     false,
+		"webbpulse_project":                        false,
+		"webbpulse_registry_module":                false,
+		"webbpulse_registry_provider":              false,
+		"webbpulse_workspace_remote_state_sharing": false,
 	}
 
 	for _, newResource := range New("test")().(interface {
