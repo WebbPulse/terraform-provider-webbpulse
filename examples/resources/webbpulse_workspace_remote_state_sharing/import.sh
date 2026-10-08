@@ -1,0 +1,1 @@
+terraform import webbpulse_workspace_remote_state_sharing.network ws-01JABCDEF0123456789ABCDEF

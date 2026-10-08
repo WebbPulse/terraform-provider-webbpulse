@@ -213,6 +213,7 @@ func (p *webbpulseProvider) Resources(_ context.Context) []func() resource.Resou
 		NewWorkspaceResource,
 		NewVariableResource,
 		NewNotificationConfigurationResource,
+		NewRemoteStateSharingResource,
 		NewProjectResource,
 		NewRegistryModuleResource,
 		NewRegistryProviderResource,
@@ -224,6 +225,7 @@ func (p *webbpulseProvider) DataSources(_ context.Context) []func() datasource.D
 	return []func() datasource.DataSource{
 		NewWorkspaceDataSource,
 		NewWorkspacesDataSource,
+		NewWorkspaceOutputsDataSource,
 		NewProjectDataSource,
 		NewRunRoleCheckDataSource,
 		NewRegistryModuleDataSource,
