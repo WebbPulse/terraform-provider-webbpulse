@@ -14,9 +14,9 @@ import (
 )
 
 const (
-	planSecretARNsMax         = 10
-	planSecretARNMaxLength    = 200
-	planSecretARNPatternValue = `^arn:aws:secretsmanager:(\*|[a-z]{2}(-[a-z]+)+-[0-9]):[0-9]{12}:secret:[A-Za-z0-9/_+=.@*?-]+$`
+	planSecretARNsMax             = 10
+	planSecretARNMaxLength        = 200
+	planSecretARNPatternValue     = `^arn:aws:secretsmanager:(\*|[a-z]{2}(-[a-z]+)+-[0-9]):[0-9]{12}:secret:[A-Za-z0-9/_+=.@*?-]+$`
 	planAssumeRoleARNsMax         = 10
 	planAssumeRoleARNMaxLength    = 160
 	planAssumeRoleARNPatternValue = `^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$`
