@@ -131,6 +131,7 @@ func TestResourceTypeNames(t *testing.T) {
 		"webbpulse_workspace":                  false,
 		"webbpulse_variable":                   false,
 		"webbpulse_notification_configuration": false,
+		"webbpulse_project":                    false,
 		"webbpulse_registry_module":            false,
 		"webbpulse_registry_provider":          false,
 	}

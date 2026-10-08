@@ -1,9 +1,9 @@
 # terraform-provider-webbpulse
 
 Terraform provider for the WebbPulse Terraform control plane. It manages
-workspaces with their variables and run notifications, private registry
-modules and providers, and reads a workspace's run role check. Per resource
-reference lives in `docs/`, generated with `tfplugindocs generate` from the
+projects, workspaces with their variables and run notifications, private
+registry modules and providers, and reads a workspace's run role check. Per
+resource reference lives in `docs/`, generated with `tfplugindocs generate` from the
 schema and `examples/`.
 
 Built on the HashiCorp Terraform Plugin Framework v1.19.0, protocol 6.
@@ -96,7 +96,33 @@ naming the code.
 
 Optional: `force_delete` (default `false`), `trigger_patterns` (default `[]`),
 `file_triggers_enabled` (default `true`), `speculative_enabled` (default
-`true`), `plan_assume_role_arns` (default `[]`), and the `vcs_repo` block.
+`true`), `plan_assume_role_arns` (default `[]`), `project_id` (default
+`prj-default`), and the `vcs_repo` block.
+
+`project_id` places the workspace in a project. Unset, or `prj-default`, means
+the default project, so existing workspaces plan no change. Changing it moves
+the workspace in place, and a project that does not exist is refused with a 422
+carrying `PROJECT_NOT_FOUND`, surfaced on `project_id`. A create in the default
+project leaves `project_id` out of the request.
+
+### `webbpulse_project`
+
+Creates, reads, updates and deletes one project, like `tfe_project`. Imports by
+project id. `name` (up to 40 letters, digits, single spaces, hyphens and
+underscores) renames in place and is unique ignoring case, so a taken name is a
+409 carrying `PROJECT_NAME_TAKEN`; `Default Project` is reserved. `description`
+(up to 256 characters) defaults to empty, and removing it clears it.
+`workspace_count` is computed.
+
+A project is deleted only once it is empty: a destroy while it still holds
+workspaces is a 409 carrying `PROJECT_NOT_EMPTY`, and nothing is moved for you.
+The default project, `prj-default`, is built in, so importing it is refused
+and an edit or a delete of it is a 409 carrying `DEFAULT_PROJECT_READ_ONLY`.
+Read it with the data source instead.
+
+```sh
+terraform import webbpulse_project.platform prj-01JABCDEF0123456789ABCDEFG
+```
 
 `plan_assume_role_arns` is a set of exact IAM role ARNs a plan session may
 assume beside its read only access, such as a Route 53 reader role in another
@@ -253,6 +279,11 @@ Connecting and deleting are step-up gated for a user session, which surfaces as
   by name lists every workspace and filters in the provider. It returns the
   same attributes as the resource, with `vcs_repo` as a computed object that is
   null when no repository is connected.
+- `webbpulse_project` reads one project by `name`, ignoring case, and returns
+  its `id`, `description`, `is_default`, `workspace_count` and timestamps. The
+  default project answers to `Default Project`, with `id` `prj-default` and null
+  timestamps. Like the workspace lookup, it lists every project and filters in
+  the provider.
 - `webbpulse_workspaces` returns every workspace's `ids` and `names`. The API
   takes no filters on its listing route.
 - `webbpulse_registry_module` and `webbpulse_registry_provider` read one

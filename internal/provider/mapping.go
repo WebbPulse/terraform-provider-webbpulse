@@ -45,6 +45,7 @@ func applyWorkspace(ctx context.Context, from *client.Workspace, into *workspace
 	into.SpeculativeEnabled = boolOrTrue(from.SpeculativePlans)
 	into.PlanAssumeRoleARNs = arns
 	into.AutoApply = types.BoolValue(from.AutoApply != nil && *from.AutoApply)
+	into.ProjectID = types.StringValue(projectIDOrDefault(from.ProjectID))
 	return diags
 }
 
@@ -74,4 +75,13 @@ func optionalString(value *string) types.String {
 		return types.StringNull()
 	}
 	return types.StringValue(*value)
+}
+
+// projectIDOrDefault reads an absent project id, from an API that predates
+// projects, as the default project.
+func projectIDOrDefault(projectID string) string {
+	if projectID == "" {
+		return client.DefaultProjectID
+	}
+	return projectID
 }

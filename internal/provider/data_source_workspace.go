@@ -42,6 +42,7 @@ type workspaceDataModel struct {
 	SpeculativeEnabled  types.Bool   `tfsdk:"speculative_enabled"`
 	AutoApply           types.Bool   `tfsdk:"auto_apply"`
 	PlanAssumeRoleARNs  types.Set    `tfsdk:"plan_assume_role_arns"`
+	ProjectID           types.String `tfsdk:"project_id"`
 }
 
 // workspaceDataFrom narrows a resource model to the data source model.
@@ -65,6 +66,7 @@ func workspaceDataFrom(m workspaceModel) *workspaceDataModel {
 		SpeculativeEnabled:  m.SpeculativeEnabled,
 		AutoApply:           m.AutoApply,
 		PlanAssumeRoleARNs:  m.PlanAssumeRoleARNs,
+		ProjectID:           m.ProjectID,
 	}
 }
 
@@ -121,6 +123,10 @@ func (d *workspaceDataSource) Schema(_ context.Context, _ datasource.SchemaReque
 			"auto_apply": schema.BoolAttribute{
 				Computed:            true,
 				MarkdownDescription: "Whether a run whose plan has changes applies without a confirmation.",
+			},
+			"project_id": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "The project the workspace belongs to, `prj-default` for the default project.",
 			},
 			"plan_assume_role_arns": schema.SetAttribute{
 				Computed:            true,
