@@ -7,6 +7,8 @@ resource "webbpulse_workspace" "example" {
     "arn:aws:iam::111122223333:role/route53-reader",
   ]
 
+  plan_role_arn = "arn:aws:iam::111122223333:role/example-plan"
+
   plan_secret_arns = [
     "arn:aws:secretsmanager:*:111122223333:secret:example/app-*",
   ]

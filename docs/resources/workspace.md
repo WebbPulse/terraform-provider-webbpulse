@@ -22,6 +22,8 @@ resource "webbpulse_workspace" "example" {
     "arn:aws:iam::111122223333:role/route53-reader",
   ]
 
+  plan_role_arn = "arn:aws:iam::111122223333:role/example-plan"
+
   plan_secret_arns = [
     "arn:aws:secretsmanager:*:111122223333:secret:example/app-*",
   ]
@@ -50,6 +52,7 @@ resource "webbpulse_workspace" "example" {
 - `force_delete` (Boolean) Whether destroying this resource deletes the workspace even when its state still tracks resources, leaving them unmanaged. Defaults to `false`, so a workspace that still manages resources is refused with `WORKSPACE_MANAGES_RESOURCES` until they are destroyed. Set it and apply before the destroy, because a destroy reads it from state. It never skips the `WORKSPACE_HAS_ACTIVE_RUN` refusal while a run is active.
 - `plan_assume_role_arns` (Set of String) Exact IAM role ARNs a plan session may assume beside its read only access, such as a Route 53 reader role in another account. At most 10, each up to 160 characters, with no wildcards. An apply is not limited by this list. Removing it, or setting it to `[]`, sends an explicit null and clears the list.
 - `plan_secret_arns` (Set of String) Secrets Manager ARN patterns whose values a plan session may read, such as `arn:aws:secretsmanager:*:111122223333:secret:app-*`. At most 10, each up to 200 characters and pinned to one account; the region and the name may hold `*` or `?` wildcards. When the list is empty, a confirmable plan may read any secret and a speculative plan, such as a pull request plan, may read none. An apply is not limited by this list. Setting it needs `admin` or the factory grant, and a recent sign in for a person. Removing it, or setting it to `[]`, sends an explicit null and clears the list.
+- `plan_role_arn` (String) The read only role a plan session assumes in place of the run role, such as `arn:aws:iam::111122223333:role/example-plan`. An exact IAM role ARN of up to 140 characters with no wildcards. Unset, a plan uses the run role narrowed to read only access. An apply is not limited by it. Setting it needs `admin` or the factory grant, and a recent sign in for a person. Removing it sends an explicit null and clears the role.
 - `project_id` (String) The project the workspace belongs to, such as `webbpulse_project.example.id`. Unset, or `prj-default`, means the default project, which every workspace not moved elsewhere sits in. Changing it moves the workspace in place; its state and runs stay put. A project that does not exist is refused with `PROJECT_NOT_FOUND`.
 - `run_role_arn` (String) The role the runner assumes for this workspace. Optional on create: the role's trust policy names the workspace id as its external id, so the role cannot exist until the workspace does. Build it from `run_role_setup`, then set this. Removing it sends an explicit null and clears the role and its recorded check outcome.
 - `speculative_enabled` (Boolean) Whether a pull request upload starts a plan only run. Sent to the API as `speculative_plans`. Defaults to `true`.

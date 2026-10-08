@@ -58,6 +58,7 @@ type workspaceModel struct {
 	SpeculativeEnabled  types.Bool   `tfsdk:"speculative_enabled"`
 	PlanAssumeRoleARNs  types.Set    `tfsdk:"plan_assume_role_arns"`
 	PlanSecretARNs      types.Set    `tfsdk:"plan_secret_arns"`
+	PlanRoleARN         types.String `tfsdk:"plan_role_arn"`
 	AutoApply           types.Bool   `tfsdk:"auto_apply"`
 	ProjectID           types.String `tfsdk:"project_id"`
 }
@@ -194,6 +195,15 @@ func (r *workspaceResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 					"or the factory grant, and a recent sign in for a person. Removing it, or setting it to `[]`, " +
 					"sends an explicit null and clears the list.",
 				Validators: planSecretARNsValidators(),
+			},
+			"plan_role_arn": schema.StringAttribute{
+				Optional: true,
+				MarkdownDescription: "The read only role a plan session assumes in place of the run role, such as " +
+					"`arn:aws:iam::111122223333:role/example-plan`. An exact IAM role ARN of up to 140 characters " +
+					"with no wildcards. Unset, a plan uses the run role narrowed to read only access. An apply is " +
+					"not limited by it. Setting it needs `admin` or the factory grant, and a recent sign in for a " +
+					"person. Removing it sends an explicit null and clears the role.",
+				Validators: planRoleARNValidators(),
 			},
 			"description": schema.StringAttribute{
 				Optional:            true,
@@ -353,6 +363,10 @@ func (r *workspaceResource) Create(ctx context.Context, req resource.CreateReque
 		return
 	}
 	body.PlanSecretARNs = secretARNs
+	if !plan.PlanRoleARN.IsNull() && !plan.PlanRoleARN.IsUnknown() {
+		arn := plan.PlanRoleARN.ValueString()
+		body.PlanRoleARN = &arn
+	}
 	if projectID := plan.ProjectID.ValueString(); projectID != client.DefaultProjectID {
 		body.ProjectID = projectID
 	}
@@ -416,6 +430,7 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 		Engine:              changedString(plan.Engine, state.Engine),
 		EngineVersion:       changedString(plan.EngineVersion, state.EngineVersion),
 		RunRoleARN:          clearablePatch(plan.RunRoleARN, state.RunRoleARN),
+		PlanRoleARN:         clearablePatch(plan.PlanRoleARN, state.PlanRoleARN),
 		WorkingDirectory:    clearablePatch(plan.WorkingDirectory, state.WorkingDirectory),
 		Description:         clearablePatch(plan.Description, state.Description),
 		FileTriggersEnabled: changedBool(plan.FileTriggersEnabled, state.FileTriggersEnabled),

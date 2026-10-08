@@ -36,6 +36,7 @@ data "webbpulse_workspace" "example" {
 - `file_triggers_enabled` (Boolean) Whether uploads are filtered by changed paths.
 - `plan_assume_role_arns` (Set of String) Exact IAM role ARNs a plan session may assume beside its read only access.
 - `plan_secret_arns` (Set of String) Secrets Manager ARN patterns whose values a plan session may read.
+- `plan_role_arn` (String) The read only role a plan session assumes, or null when plans use the run role narrowed to read only access.
 - `project_id` (String) The project the workspace belongs to, `prj-default` for the default project.
 - `run_role_account_id` (String) The account the run role resolved to on its last successful check.
 - `run_role_arn` (String) The role the runner assumes for this workspace.

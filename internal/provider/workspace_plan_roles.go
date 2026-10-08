@@ -20,6 +20,8 @@ const (
 	planAssumeRoleARNsMax         = 10
 	planAssumeRoleARNMaxLength    = 160
 	planAssumeRoleARNPatternValue = `^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$`
+	planRoleARNMinLength          = 20
+	planRoleARNMaxLength          = 140
 )
 
 var planAssumeRoleARNPattern = regexp.MustCompile(planAssumeRoleARNPatternValue)
@@ -38,6 +40,18 @@ func planSecretARNsValidators() []validator.Set {
 				planSecretARNPattern,
 				"must be a Secrets Manager ARN pattern, arn:aws:secretsmanager:<region or *>:<12 digit account id>:secret:<name pattern>",
 			),
+		),
+	}
+}
+
+// planRoleARNValidators mirror the API's limits on plan_role_arn: one exact IAM
+// role ARN of 20 to 140 characters, no wildcards.
+func planRoleARNValidators() []validator.String {
+	return []validator.String{
+		stringvalidator.LengthBetween(planRoleARNMinLength, planRoleARNMaxLength),
+		stringvalidator.RegexMatches(
+			planAssumeRoleARNPattern,
+			"must be an exact IAM role ARN, arn:aws:iam::<12 digit account id>:role/<name>, with no wildcards",
 		),
 	}
 }
