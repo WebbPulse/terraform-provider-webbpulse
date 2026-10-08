@@ -7,6 +7,10 @@ resource "webbpulse_workspace" "example" {
     "arn:aws:iam::111122223333:role/route53-reader",
   ]
 
+  plan_secret_arns = [
+    "arn:aws:secretsmanager:*:111122223333:secret:example/app-*",
+  ]
+
   vcs_repo {
     identifier = "WebbPulse/example-infra"
     branch     = "main"

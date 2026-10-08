@@ -57,6 +57,7 @@ type workspaceModel struct {
 	FileTriggersEnabled types.Bool   `tfsdk:"file_triggers_enabled"`
 	SpeculativeEnabled  types.Bool   `tfsdk:"speculative_enabled"`
 	PlanAssumeRoleARNs  types.Set    `tfsdk:"plan_assume_role_arns"`
+	PlanSecretARNs      types.Set    `tfsdk:"plan_secret_arns"`
 	AutoApply           types.Bool   `tfsdk:"auto_apply"`
 	ProjectID           types.String `tfsdk:"project_id"`
 }
@@ -179,6 +180,20 @@ func (r *workspaceResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 					"with no wildcards. An apply is not limited by this list. Removing it, or setting it to " +
 					"`[]`, sends an explicit null and clears the list.",
 				Validators: planAssumeRoleARNsValidators(),
+			},
+			"plan_secret_arns": schema.SetAttribute{
+				Optional:    true,
+				Computed:    true,
+				ElementType: types.StringType,
+				Default:     setdefault.StaticValue(emptyStringSet()),
+				MarkdownDescription: "Secrets Manager ARN patterns whose values a plan session may read, such as " +
+					"`arn:aws:secretsmanager:*:111122223333:secret:app-*`. At most 10, each up to 200 characters " +
+					"and pinned to one account; the region and the name may hold `*` or `?` wildcards. When the " +
+					"list is empty, a confirmable plan may read any secret and a speculative plan, such as a pull " +
+					"request plan, may read none. An apply is not limited by this list. Setting it needs `admin` " +
+					"or the factory grant, and a recent sign in for a person. Removing it, or setting it to `[]`, " +
+					"sends an explicit null and clears the list.",
+				Validators: planSecretARNsValidators(),
 			},
 			"description": schema.StringAttribute{
 				Optional:            true,
@@ -332,6 +347,12 @@ func (r *workspaceResource) Create(ctx context.Context, req resource.CreateReque
 		return
 	}
 	body.PlanAssumeRoleARNs = arns
+	secretARNs, secretDiags := setStrings(ctx, plan.PlanSecretARNs)
+	resp.Diagnostics.Append(secretDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	body.PlanSecretARNs = secretARNs
 	if projectID := plan.ProjectID.ValueString(); projectID != client.DefaultProjectID {
 		body.ProjectID = projectID
 	}
@@ -414,8 +435,11 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 		body.TriggerPatterns = &patterns
 	}
 	var arnDiags diag.Diagnostics
-	body.PlanAssumeRoleARNs, arnDiags = planAssumeRoleARNsPatch(ctx, plan.PlanAssumeRoleARNs, state.PlanAssumeRoleARNs)
+	body.PlanAssumeRoleARNs, arnDiags = stringSetPatch(ctx, plan.PlanAssumeRoleARNs, state.PlanAssumeRoleARNs)
 	resp.Diagnostics.Append(arnDiags...)
+	var secretDiags diag.Diagnostics
+	body.PlanSecretARNs, secretDiags = stringSetPatch(ctx, plan.PlanSecretARNs, state.PlanSecretARNs)
+	resp.Diagnostics.Append(secretDiags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}

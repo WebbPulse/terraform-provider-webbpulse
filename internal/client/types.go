@@ -33,6 +33,7 @@ type Workspace struct {
 	VCSRepositoryID     *string      `json:"vcs_repository_id"`
 	VCSInstallationID   *string      `json:"vcs_installation_id"`
 	PlanAssumeRoleARNs  []string     `json:"plan_assume_role_arns"`
+	PlanSecretARNs      []string     `json:"plan_secret_arns"`
 	AutoApply           *bool        `json:"auto_apply"`
 	ProjectID           string       `json:"project_id"`
 }
@@ -51,6 +52,7 @@ type WorkspaceCreate struct {
 	SpeculativePlans    *bool    `json:"speculative_plans,omitempty"`
 	FileTriggersEnabled *bool    `json:"file_triggers_enabled,omitempty"`
 	PlanAssumeRoleARNs  []string `json:"plan_assume_role_arns,omitempty"`
+	PlanSecretARNs      []string `json:"plan_secret_arns,omitempty"`
 	AutoApply           *bool    `json:"auto_apply,omitempty"`
 	ProjectID           string   `json:"project_id,omitempty"`
 }
@@ -69,6 +71,7 @@ type WorkspaceUpdate struct {
 	SpeculativePlans    *bool     `json:"speculative_plans,omitempty"`
 	FileTriggersEnabled *bool     `json:"file_triggers_enabled,omitempty"`
 	PlanAssumeRoleARNs  *[]string `json:"plan_assume_role_arns,omitempty"`
+	PlanSecretARNs      *[]string `json:"plan_secret_arns,omitempty"`
 	AutoApply           *bool     `json:"auto_apply,omitempty"`
 	ProjectID           *string   `json:"project_id,omitempty"`
 }

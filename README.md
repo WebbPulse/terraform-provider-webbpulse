@@ -96,8 +96,8 @@ naming the code.
 
 Optional: `force_delete` (default `false`), `trigger_patterns` (default `[]`),
 `file_triggers_enabled` (default `true`), `speculative_enabled` (default
-`true`), `plan_assume_role_arns` (default `[]`), `project_id` (default
-`prj-default`), and the `vcs_repo` block.
+`true`), `plan_assume_role_arns` (default `[]`), `plan_secret_arns` (default
+`[]`), `project_id` (default `prj-default`), and the `vcs_repo` block.
 
 `project_id` places the workspace in a project. Unset, or `prj-default`, means
 the default project, so existing workspaces plan no change. Changing it moves
@@ -131,6 +131,20 @@ account; an apply is not limited by it. The validators mirror the API: at most
 `arn:aws:iam::<12 digit account id>:role/<name>`, with no wildcards. It updates
 in place and the PATCH replaces the whole list. Removing it or setting `[]`
 sends an explicit null, which clears it. The data source returns it too.
+
+`plan_secret_arns` is a set of Secrets Manager ARN patterns whose values a plan
+session may read. When it is empty, a confirmable plan may read any secret and a
+speculative plan (`plan_only` or a pull request plan) may read none, so a
+workspace whose pull request plans refresh secrets has to name them. The
+validators mirror the API: at most 10 patterns, each up to 200 characters and
+of the form `arn:aws:secretsmanager:<region or *>:<12 digit account
+id>:secret:<name pattern>`, with `*` and `?` allowed in the name. An apply is
+not limited by it. Setting it, like `plan_assume_role_arns`, needs `admin` or a
+run token holding the factory grant (`workspaces:factory`), plus a recent sign
+in for a person, and the reader roles and secret patterns together must fit the
+plan's session policy or the API refuses with `PLAN_SESSION_POLICY_TOO_LARGE`.
+It updates in place, the PATCH replaces the whole list, and removing it or
+setting `[]` sends an explicit null. The data source returns it too.
 
 Computed: `workspace_id`, `created_at`, `updated_at`, `run_role_setup`
 (`principal_arn`, `principal_arns`, `external_id`, `role_name`),
