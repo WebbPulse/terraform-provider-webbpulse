@@ -158,6 +158,14 @@ func workspaceWriteDiagnostic(summary string, err error) diag.Diagnostic {
 			client.GitHubUnavailableCode+": the API could not reach GitHub to resolve vcs_repo.identifier. "+
 				"This is usually transient, so apply again shortly. "+err.Error(),
 		)
+	case client.ProjectNotFoundCode:
+		return diag.NewAttributeErrorDiagnostic(
+			path.Root("project_id"),
+			"The project does not exist",
+			client.ProjectNotFoundCode+": project_id names no project in this environment. Create it with "+
+				"a webbpulse_project resource and reference its id, or leave project_id unset for the "+
+				"default project. "+err.Error(),
+		)
 	}
 	return apiDiagnostic(summary, err)
 }

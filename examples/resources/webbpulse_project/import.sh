@@ -1,0 +1,1 @@
+terraform import webbpulse_project.platform prj-01JABCDEF0123456789ABCDEFG

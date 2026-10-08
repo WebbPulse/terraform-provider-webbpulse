@@ -58,6 +58,7 @@ type workspaceModel struct {
 	SpeculativeEnabled  types.Bool   `tfsdk:"speculative_enabled"`
 	PlanAssumeRoleARNs  types.Set    `tfsdk:"plan_assume_role_arns"`
 	AutoApply           types.Bool   `tfsdk:"auto_apply"`
+	ProjectID           types.String `tfsdk:"project_id"`
 }
 
 func runRoleSetupAttrTypes() map[string]attr.Type {
@@ -155,6 +156,18 @@ func (r *workspaceResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				MarkdownDescription: "Whether a run whose plan has changes applies without a confirmation, like HCP " +
 					"Terraform's auto-apply. Plan only and pull request runs never apply. Changing it needs a token " +
 					"with `admin`. Defaults to `false`.",
+			},
+			"project_id": schema.StringAttribute{
+				Optional: true,
+				Computed: true,
+				Default:  stringdefault.StaticString(client.DefaultProjectID),
+				MarkdownDescription: "The project the workspace belongs to, such as `webbpulse_project.example.id`. " +
+					"Unset, or `prj-default`, means the default project, which every workspace not moved " +
+					"elsewhere sits in. Changing it moves the workspace in place; its state and runs stay put. " +
+					"A project that does not exist is refused with `PROJECT_NOT_FOUND`.",
+				Validators: []validator.String{
+					stringvalidator.RegexMatches(regexp.MustCompile(projectIDPattern), "must be a project id such as prj-default"),
+				},
 			},
 			"plan_assume_role_arns": schema.SetAttribute{
 				Optional:    true,
@@ -319,6 +332,9 @@ func (r *workspaceResource) Create(ctx context.Context, req resource.CreateReque
 		return
 	}
 	body.PlanAssumeRoleARNs = arns
+	if projectID := plan.ProjectID.ValueString(); projectID != client.DefaultProjectID {
+		body.ProjectID = projectID
+	}
 
 	created, err := r.client.CreateWorkspace(ctx, body)
 	if err != nil {
@@ -384,6 +400,7 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 		FileTriggersEnabled: changedBool(plan.FileTriggersEnabled, state.FileTriggersEnabled),
 		SpeculativePlans:    changedBool(plan.SpeculativeEnabled, state.SpeculativeEnabled),
 		AutoApply:           changedBool(plan.AutoApply, state.AutoApply),
+		ProjectID:           changedString(plan.ProjectID, state.ProjectID),
 	}
 	var vcsDiags diag.Diagnostics
 	body.VCSRepo, body.TrackedBranch, vcsDiags = vcsPatch(ctx, plan.VCSRepo, state.VCSRepo)

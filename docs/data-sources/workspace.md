@@ -35,6 +35,7 @@ data "webbpulse_workspace" "example" {
 - `engine_version` (String) The engine version this workspace runs.
 - `file_triggers_enabled` (Boolean) Whether uploads are filtered by changed paths.
 - `plan_assume_role_arns` (Set of String) Exact IAM role ARNs a plan session may assume beside its read only access.
+- `project_id` (String) The project the workspace belongs to, `prj-default` for the default project.
 - `run_role_account_id` (String) The account the run role resolved to on its last successful check.
 - `run_role_arn` (String) The role the runner assumes for this workspace.
 - `run_role_checked_at` (String) When the run role last answered an AssumeRole.

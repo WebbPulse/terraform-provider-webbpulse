@@ -10,7 +10,8 @@ type RunRoleSetup struct {
 
 // Workspace is a stored workspace as the API renders it. SpeculativePlans and
 // FileTriggersEnabled are nil from an API that predates them, which a caller
-// reads as their default of true.
+// reads as their default of true, and ProjectID is empty from an API that
+// predates projects, which a caller reads as the default project.
 type Workspace struct {
 	WorkspaceID         string       `json:"workspace_id"`
 	Name                string       `json:"name"`
@@ -33,6 +34,7 @@ type Workspace struct {
 	VCSInstallationID   *string      `json:"vcs_installation_id"`
 	PlanAssumeRoleARNs  []string     `json:"plan_assume_role_arns"`
 	AutoApply           *bool        `json:"auto_apply"`
+	ProjectID           string       `json:"project_id"`
 }
 
 // WorkspaceCreate is the body of a workspace create.
@@ -50,6 +52,7 @@ type WorkspaceCreate struct {
 	FileTriggersEnabled *bool    `json:"file_triggers_enabled,omitempty"`
 	PlanAssumeRoleARNs  []string `json:"plan_assume_role_arns,omitempty"`
 	AutoApply           *bool    `json:"auto_apply,omitempty"`
+	ProjectID           string   `json:"project_id,omitempty"`
 }
 
 // WorkspaceUpdate omits nil fields; a pointer to a nil string or a nil slice
@@ -67,6 +70,7 @@ type WorkspaceUpdate struct {
 	FileTriggersEnabled *bool     `json:"file_triggers_enabled,omitempty"`
 	PlanAssumeRoleARNs  *[]string `json:"plan_assume_role_arns,omitempty"`
 	AutoApply           *bool     `json:"auto_apply,omitempty"`
+	ProjectID           *string   `json:"project_id,omitempty"`
 }
 
 // WorkspaceList is the envelope every workspace listing returns.

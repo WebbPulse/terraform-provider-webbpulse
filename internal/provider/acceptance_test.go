@@ -47,9 +47,9 @@ func testAccPreCheck(t *testing.T) {
 	}
 }
 
-// TestAccSweepStaleWorkspaces deletes tfacc- workspaces a failed earlier run
-// left behind. The acceptance workflow never overlaps itself, so any such
-// workspace older than ten minutes belongs to no running test.
+// TestAccSweepStaleWorkspaces deletes tfacc- workspaces, then tfacc- projects,
+// a failed earlier run left behind. The acceptance workflow never overlaps
+// itself, so any such one older than ten minutes belongs to no running test.
 func TestAccSweepStaleWorkspaces(t *testing.T) {
 	testAccPreCheck(t)
 
@@ -73,6 +73,25 @@ func TestAccSweepStaleWorkspaces(t *testing.T) {
 			continue
 		}
 		t.Logf("deleted stale workspace %s", ws.Name)
+	}
+
+	projects, err := c.ListProjects(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, prj := range projects {
+		if prj.IsDefault || prj.CreatedAt == nil || !strings.HasPrefix(prj.Name, "tfacc-") {
+			continue
+		}
+		created, parseErr := time.Parse(time.RFC3339Nano, *prj.CreatedAt)
+		if parseErr != nil || created.After(cutoff) {
+			continue
+		}
+		if err := c.DeleteProject(ctx, prj.ProjectID); err != nil && !client.IsNotFound(err) {
+			t.Errorf("deleting stale project %s: %v", prj.Name, err)
+			continue
+		}
+		t.Logf("deleted stale project %s", prj.Name)
 	}
 }
 
@@ -478,6 +497,96 @@ data "webbpulse_workspace" "test" {
 					resource.TestCheckResourceAttr(address, "plan_assume_role_arns.#", "0"),
 					resource.TestCheckResourceAttr("data.webbpulse_workspace.test", "plan_assume_role_arns.#", "0"),
 				),
+			},
+		},
+	})
+}
+
+// TestAccProject creates, renames, clears and imports a project against a live
+// API, moves a workspace into it and back to the default, looks both projects
+// up by name and checks a name taken ignoring case is refused.
+func TestAccProject(t *testing.T) {
+	testAccPreCheck(t)
+
+	name := testAccName("prj")
+	renamed := name + "-b"
+	const address = "webbpulse_project.test"
+	const workspace = "webbpulse_workspace.test"
+	config := func(projectName, description, projectID, extra string) string {
+		return fmt.Sprintf(`
+resource "webbpulse_project" "test" {
+  name = %q
+%s
+}
+
+resource "webbpulse_workspace" "test" {
+  name           = %q
+  engine_version = "1.9.8"
+%s
+}
+
+data "webbpulse_project" "default" {
+  name = "Default Project"
+}
+%s
+`, projectName, description, name, projectID, extra)
+	}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config(name, `  description = "created by an acceptance test"`, "", ""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestMatchResourceAttr(address, "id", regexp.MustCompile(projectIDPattern)),
+					resource.TestCheckResourceAttr(address, "name", name),
+					resource.TestCheckResourceAttr(address, "description", "created by an acceptance test"),
+					resource.TestCheckResourceAttr(address, "workspace_count", "0"),
+					resource.TestCheckResourceAttrSet(address, "created_at"),
+					resource.TestCheckResourceAttr(workspace, "project_id", client.DefaultProjectID),
+					resource.TestCheckResourceAttr("data.webbpulse_project.default", "id", client.DefaultProjectID),
+					resource.TestCheckResourceAttr("data.webbpulse_project.default", "is_default", "true"),
+				),
+			},
+			{
+				Config: config(renamed, "", "  project_id     = webbpulse_project.test.id", `
+data "webbpulse_project" "by_name" {
+  name       = upper(webbpulse_project.test.name)
+  depends_on = [webbpulse_workspace.test]
+}
+`),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(address, "name", renamed),
+					resource.TestCheckResourceAttr(address, "description", ""),
+					resource.TestCheckResourceAttrPair(workspace, "project_id", address, "id"),
+					resource.TestCheckResourceAttrPair("data.webbpulse_project.by_name", "id", address, "id"),
+					resource.TestCheckResourceAttr("data.webbpulse_project.by_name", "workspace_count", "1"),
+					resource.TestCheckResourceAttr("data.webbpulse_project.by_name", "is_default", "false"),
+				),
+			},
+			{
+				ResourceName:            address,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"workspace_count", "updated_at"},
+			},
+			{
+				Config: config(renamed, "", "  project_id     = webbpulse_project.test.id", fmt.Sprintf(`
+resource "webbpulse_project" "taken" {
+  name = %q
+}
+`, strings.ToUpper(renamed))),
+				ExpectError: regexp.MustCompile(client.ProjectNameTakenCode),
+			},
+			{
+				Config: config(renamed, "", "", ""),
+				Check:  resource.TestCheckResourceAttr(workspace, "project_id", client.DefaultProjectID),
+			},
+			{
+				ResourceName:  address,
+				ImportState:   true,
+				ImportStateId: client.DefaultProjectID,
+				ExpectError:   regexp.MustCompile(`default project cannot be managed`),
 			},
 		},
 	})
