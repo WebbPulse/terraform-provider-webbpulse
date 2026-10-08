@@ -97,7 +97,8 @@ naming the code.
 Optional: `force_delete` (default `false`), `trigger_patterns` (default `[]`),
 `file_triggers_enabled` (default `true`), `speculative_enabled` (default
 `true`), `plan_assume_role_arns` (default `[]`), `plan_secret_arns` (default
-`[]`), `project_id` (default `prj-default`), and the `vcs_repo` block.
+`[]`), `plan_role_arn`, `project_id` (default `prj-default`), and the
+`vcs_repo` block.
 
 `project_id` places the workspace in a project. Unset, or `prj-default`, means
 the default project, so existing workspaces plan no change. Changing it moves
@@ -145,6 +146,17 @@ in for a person, and the reader roles and secret patterns together must fit the
 plan's session policy or the API refuses with `PLAN_SESSION_POLICY_TOO_LARGE`.
 It updates in place, the PATCH replaces the whole list, and removing it or
 setting `[]` sends an explicit null. The data source returns it too.
+
+`plan_role_arn` is the read only role a plan session assumes in place of the
+run role. Unset, a plan uses the run role narrowed to read only access; an
+apply is not limited by it. The validators mirror the API: one exact IAM role
+ARN of 20 to 140 characters, of the form
+`arn:aws:iam::<12 digit account id>:role/<name>`, with no wildcards. Setting or
+changing it needs `admin` or the factory grant, plus a recent sign in for a
+person, like `plan_secret_arns`. It updates in place, and removing it sends an
+explicit null, which clears it. Quick setup can also set it, so a workspace
+connected that way and managed here should name the role, or the next apply
+clears it. The data source returns it too.
 
 Computed: `workspace_id`, `created_at`, `updated_at`, `run_role_setup`
 (`principal_arn`, `principal_arns`, `external_id`, `role_name`),

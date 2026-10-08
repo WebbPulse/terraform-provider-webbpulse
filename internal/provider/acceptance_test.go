@@ -588,6 +588,87 @@ data "webbpulse_workspace" "test" {
 	})
 }
 
+// TestAccWorkspacePlanRoleARN sets, changes, removes, re-sets and imports
+// plan_role_arn against a live API, reading it back through the data source.
+// The roles do not exist, which the API does not require.
+func TestAccWorkspacePlanRoleARN(t *testing.T) {
+	testAccPreCheck(t)
+
+	name := testAccName("planrole")
+	const address = "webbpulse_workspace.test"
+	const dataAddress = "data.webbpulse_workspace.test"
+	const roleA = "arn:aws:iam::111122223333:role/tfacc-plan"
+	const roleB = "arn:aws:iam::444455556666:role/tfacc/platform-plan"
+	config := func(arn string) string {
+		return fmt.Sprintf(`
+resource "webbpulse_workspace" "test" {
+  name           = %q
+  engine_version = "1.9.8"
+%s
+}
+
+data "webbpulse_workspace" "test" {
+  workspace_id = webbpulse_workspace.test.workspace_id
+}
+`, name, arn)
+	}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		Steps: []resource.TestStep{
+			{
+				Config: config(fmt.Sprintf(`  plan_role_arn = %q`, roleA)),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(address, "plan_role_arn", roleA),
+					resource.TestCheckResourceAttr(dataAddress, "plan_role_arn", roleA),
+				),
+			},
+			{
+				Config: config(fmt.Sprintf(`  plan_role_arn = %q`, roleB)),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(address, plancheck.ResourceActionUpdate)},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(address, "plan_role_arn", roleB),
+					resource.TestCheckResourceAttr(dataAddress, "plan_role_arn", roleB),
+				),
+			},
+			{
+				Config:      config(`  plan_role_arn = "arn:aws:iam::111122223333:role/tfacc-*"`),
+				ExpectError: regexp.MustCompile(`exact\s+IAM\s+role\s+ARN`),
+			},
+			{
+				Config: config(""),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(address, plancheck.ResourceActionUpdate)},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckNoResourceAttr(address, "plan_role_arn"),
+					resource.TestCheckNoResourceAttr(dataAddress, "plan_role_arn"),
+				),
+			},
+			{
+				Config: config(fmt.Sprintf(`  plan_role_arn = %q`, roleA)),
+				Check:  resource.TestCheckResourceAttr(address, "plan_role_arn", roleA),
+			},
+			{
+				ResourceName:                         address,
+				ImportState:                          true,
+				ImportStateVerify:                    true,
+				ImportStateVerifyIdentifierAttribute: "workspace_id",
+				ImportStateIdFunc: func(state *terraform.State) (string, error) {
+					rs, ok := state.RootModule().Resources[address]
+					if !ok {
+						return "", fmt.Errorf("the workspace is not in state")
+					}
+					return rs.Primary.Attributes["workspace_id"], nil
+				},
+			},
+		},
+	})
+}
+
 // TestAccProject creates, renames, clears and imports a project against a live
 // API, moves a workspace into it and back to the default, looks both projects
 // up by name and checks a name taken ignoring case is refused.

@@ -47,6 +47,7 @@ func applyWorkspace(ctx context.Context, from *client.Workspace, into *workspace
 	into.SpeculativeEnabled = boolOrTrue(from.SpeculativePlans)
 	into.PlanAssumeRoleARNs = arns
 	into.PlanSecretARNs = secretARNs
+	into.PlanRoleARN = optionalString(from.PlanRoleARN)
 	into.AutoApply = types.BoolValue(from.AutoApply != nil && *from.AutoApply)
 	into.ProjectID = types.StringValue(projectIDOrDefault(from.ProjectID))
 	return diags

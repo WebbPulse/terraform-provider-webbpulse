@@ -28,6 +28,8 @@ func TestWorkspacePatchNullableFields(t *testing.T) {
 		{"plan roles assigned", WorkspaceUpdate{PlanAssumeRoleARNs: &[]string{"arn:aws:iam::111122223333:role/reader"}}, `{"plan_assume_role_arns":["arn:aws:iam::111122223333:role/reader"]}`},
 		{"plan secrets cleared", WorkspaceUpdate{PlanSecretARNs: &clearedRoles}, `{"plan_secret_arns":null}`},
 		{"plan secrets assigned", WorkspaceUpdate{PlanSecretARNs: &[]string{"arn:aws:secretsmanager:*:111122223333:secret:app-*"}}, `{"plan_secret_arns":["arn:aws:secretsmanager:*:111122223333:secret:app-*"]}`},
+		{"plan role cleared", WorkspaceUpdate{PlanRoleARN: &cleared}, `{"plan_role_arn":null}`},
+		{"plan role assigned", WorkspaceUpdate{PlanRoleARN: &assigned}, `{"plan_role_arn":"configured"}`},
 		{"auto-apply off", WorkspaceUpdate{AutoApply: &off}, `{"auto_apply":false}`},
 		{"vcs settings", WorkspaceUpdate{VCSRepo: &assigned, TriggerPatterns: &[]string{}, SpeculativePlans: &off, FileTriggersEnabled: &off}, `{"vcs_repo":"configured","trigger_patterns":[],"speculative_plans":false,"file_triggers_enabled":false}`},
 	} {
