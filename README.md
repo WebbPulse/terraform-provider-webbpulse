@@ -128,7 +128,7 @@ terraform import webbpulse_project.platform prj-01JABCDEF0123456789ABCDEFG
 `plan_assume_role_arns` is a set of exact IAM role ARNs a plan session may
 assume beside its read only access, such as a Route 53 reader role in another
 account; an apply is not limited by it. The validators mirror the API: at most
-10 ARNs, each up to 160 characters and of the form
+10 ARNs, each up to 140 characters and of the form
 `arn:aws:iam::<12 digit account id>:role/<name>`, with no wildcards. It updates
 in place and the PATCH replaces the whole list. Removing it or setting `[]`
 sends an explicit null, which clears it. The data source returns it too.

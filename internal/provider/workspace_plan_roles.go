@@ -18,7 +18,7 @@ const (
 	planSecretARNMaxLength        = 200
 	planSecretARNPatternValue     = `^arn:aws:secretsmanager:(\*|[a-z]{2}(-[a-z]+)+-[0-9]):[0-9]{12}:secret:[A-Za-z0-9/_+=.@*?-]+$`
 	planAssumeRoleARNsMax         = 10
-	planAssumeRoleARNMaxLength    = 160
+	planAssumeRoleARNMaxLength    = 140
 	planAssumeRoleARNPatternValue = `^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$`
 	planRoleARNMinLength          = 20
 	planRoleARNMaxLength          = 140
@@ -57,7 +57,7 @@ func planRoleARNValidators() []validator.String {
 }
 
 // planAssumeRoleARNsValidators mirror the API's limits on plan_assume_role_arns:
-// at most ten exact IAM role ARNs of up to 160 characters, no wildcards.
+// at most ten exact IAM role ARNs of up to 140 characters, no wildcards.
 func planAssumeRoleARNsValidators() []validator.Set {
 	return []validator.Set{
 		setvalidator.SizeAtMost(planAssumeRoleARNsMax),
