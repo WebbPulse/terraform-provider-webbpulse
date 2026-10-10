@@ -59,7 +59,9 @@ jobs:
       id-token: write
       actions: read
     env:
-      SECRET_ID: ${{ vars.SIGNING_KEY_SECRET_ID }}
+      SIGNING_KMS_KEY_ID: ${{ vars.SIGNING_KMS_KEY_ID }}
+      PARAMETER_PREFIX: ${{ vars.SIGNING_KEY_PARAMETER_PREFIX }}
+      KEY_ENVIRONMENT: ${{ needs.resolve.outputs.environment }}
       TAG: ${{ needs.resolve.outputs.tag }}
       GORELEASER_CURRENT_TAG: ${{ needs.resolve.outputs.tag }}
       UPLOAD_BUCKET: ${{ vars.REGISTRY_UPLOAD_BUCKET }}
@@ -89,11 +91,25 @@ jobs:
           echo "sha=$commit" >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
-        if: github.event_name == 'push'
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Check out the signer from this workflow's commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: signer-src
+          persist-credentials: false
+
+      - name: Build the KMS signer
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          (cd signer-src && CGO_ENABLED=0 go build -trimpath -o "$RUNNER_TEMP/bin/kms-openpgp" ./cmd/kms-openpgp)
+          rm -rf signer-src
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
       - name: Fetch the build the tag run published
         if: github.event_name == 'workflow_dispatch'
@@ -125,21 +141,28 @@ jobs:
           role-to-assume: ${{ vars.SIGNING_KEY_ROLE_ARN }}
           aws-region: us-west-2
 
-      - name: Import the signing key
-        id: key
+      - name: Publish the KMS public key
         run: |
           set -euo pipefail
+          if [ -z "$SIGNING_KMS_KEY_ID" ] || [ -z "$PARAMETER_PREFIX" ]; then
+            echo "::error::Set SIGNING_KMS_KEY_ID and SIGNING_KEY_PARAMETER_PREFIX on the ${KEY_ENVIRONMENT} environment"
+            exit 1
+          fi
           umask 077
           export GNUPGHOME="$RUNNER_TEMP/gnupg"
           mkdir -p "$GNUPGHOME"
           echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
-          aws secretsmanager get-secret-value --secret-id "$SECRET_ID" --query SecretString --output text | gpg --batch --import
-          fingerprint="$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "fpr" { print $10; exit }')"
-          if [ -z "$fingerprint" ]; then
-            echo "::error::The signing key secret holds no usable key"
-            exit 1
+          certificate="$RUNNER_TEMP/public.asc"
+          key_id="$(kms-openpgp public-key -key "$SIGNING_KMS_KEY_ID" -name "WebbPulse Terraform provider ${KEY_ENVIRONMENT}" -email tyler@webbpulse.com -output "$certificate")"
+          published_key="$(aws ssm get-parameter --name "$PARAMETER_PREFIX/public-key" --query Parameter.Value --output text)"
+          published_id="$(aws ssm get-parameter --name "$PARAMETER_PREFIX/key-id" --query Parameter.Value --output text)"
+          if [ "$published_key" != "$(cat "$certificate")" ] || [ "$published_id" != "$key_id" ]; then
+            aws ssm put-parameter --name "$PARAMETER_PREFIX/public-key" --type String --overwrite --value "file://$certificate" > /dev/null
+            aws ssm put-parameter --name "$PARAMETER_PREFIX/key-id" --type String --overwrite --value "$key_id" > /dev/null
+            echo "Published signing key ${key_id} (was ${published_id}) to ${PARAMETER_PREFIX}" >> "$GITHUB_STEP_SUMMARY"
           fi
-          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+          gpg --batch --import "$certificate"
+          echo "Signing with KMS key ${key_id}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Release with GoReleaser
         if: github.event_name == 'push'
@@ -149,17 +172,14 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GPG_FINGERPRINT: ${{ steps.key.outputs.fingerprint }}
 
       - name: Sign the promoted checksums
         if: github.event_name == 'workflow_dispatch'
         working-directory: dist
-        env:
-          GPG_FINGERPRINT: ${{ steps.key.outputs.fingerprint }}
         run: |
           set -euo pipefail
           prefix="terraform-provider-webbpulse_${TAG#v}"
-          gpg --batch --local-user "$GPG_FINGERPRINT" --output "${prefix}_SHA256SUMS.sig" --detach-sign "${prefix}_SHA256SUMS"
+          kms-openpgp sign -key "$SIGNING_KMS_KEY_ID" -output "${prefix}_SHA256SUMS.sig" "${prefix}_SHA256SUMS"
 
       - name: Verify the signed checksums
         working-directory: dist
@@ -204,7 +224,7 @@ jobs:
           aws s3 cp upload.json "${folder}upload.json" "${sse[@]}" --content-type application/json
           echo "Uploaded ${TAG} to ${folder}" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Forget the signing key
+      - name: Remove the verification keyring
         if: always()
         run: |
           gpgconf --kill all || true

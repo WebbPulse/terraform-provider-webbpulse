@@ -401,7 +401,7 @@ Release rules:
 - Only repository admins can create, move or delete `v*` tags (the
   `release-tags` tag ruleset).
 - The tag must point at a commit on `main`. The workflow checks this before it
-  touches the signing key and fails otherwise, so merge first, then tag the
+  signs anything and fails otherwise, so merge first, then tag the
   merge commit.
 - GoReleaser is pinned to an exact version in `release.yml`.
 
@@ -418,22 +418,57 @@ git tag v0.2.0-rc.7 origin/main && git push origin v0.2.0-rc.7
 gh workflow run release.yml --ref main -f tag=v0.2.0-rc.7 -f environment=production
 ```
 
-Each environment has its own RSA 4096 signing key, generated once in CI by the
-`signing-key` workflow (manual dispatch, run in the `<env>-signing-key`
-environment, which only `main` may deploy to). It refuses to run when the key
-already exists. The private half goes straight into the
-`webbpulse-terraform-<env>-provider-signing-key` secret in that environment's
-WebbPulse-Terraform account, whose resource policy lets only the
-`webbpulse-terraform-<env>-provider-release` role read it and only the
-`...-provider-signing-keygen` role write it. Each role trusts only its one
-environment of this repository. The public half and the long key id are the
-SSM String parameters `/webbpulse-terraform-<env>/provider-signing/public-key`
-and `.../key-id`, where the registry reads them. `<env>` is `staging` or `prod`.
-The roles, secret and parameters live in WebbPulse-Terraform `terraform/provider_signing.tf`.
+Each environment signs with its own asymmetric KMS key (RSA_4096,
+SIGN_VERIFY), `alias/webbpulse-terraform-<env>-provider-signing` in that
+environment's WebbPulse-Terraform account. The private half never leaves KMS.
+The key policy denies `kms:Sign` to everyone but the
+`webbpulse-terraform-<env>-provider-release` role, which trusts only its one
+environment of this repository. `cmd/kms-openpgp` turns the key into an OpenPGP
+v4 RSA key: `public-key` writes an armored certificate self-signed through
+`kms:Sign`, and `sign` writes the binary detached signature GoReleaser and the
+promotion path attach as `_SHA256SUMS.sig`. The OpenPGP creation time is the KMS
+key's creation date and PKCS #1 v1.5 signing is deterministic, so one KMS key
+always gives the same certificate and key id. Every release run writes that
+certificate and its long key id to the SSM String parameters
+`/webbpulse-terraform-<env>/provider-signing/public-key` and `.../key-id`, where
+the registry reads them, when they differ from what is there. The key, alias,
+role and parameters live in WebbPulse-Terraform `terraform/provider_signing.tf`.
+`<env>` is `staging` or `prod`.
 
-Environment variables on this repository: `SIGNING_KEY_ROLE_ARN` and
-`SIGNING_KEY_SECRET_ID` on all four environments, plus
-`SIGNING_KEY_PARAMETER_PREFIX` on the two `-signing-key` ones.
+Environment variables on the `staging` and `production` environments:
+`SIGNING_KEY_ROLE_ARN`, `SIGNING_KMS_KEY_ID` (the alias ARN, the
+`provider_signing_kms_key_alias_arn` output), `SIGNING_KEY_PARAMETER_PREFIX`,
+`REGISTRY_UPLOAD_BUCKET` and `REGISTRY_UPLOAD_KMS_KEY_ARN`.
+
+### Rotating the signing key
+
+The registry stores the key id and armored key with each version it publishes,
+so a rotation only changes the key that signs new versions. Consumers re-lock
+only when they bump the version they pin, for example WebbPulse-Platform's
+`terraform.webbpulse.com/webbpulse/webbpulse` pin in `versions.tf`; the lock
+holds hashes, not the key id, so nothing else changes for them. Terraform prints
+the new key id on the next `init` of a bumped version.
+
+To rotate an environment, or to switch it from the old GPG key to KMS:
+
+1. Apply WebbPulse-Terraform so the KMS key and the release role's
+   `kms:Sign`, `kms:GetPublicKey`, `kms:DescribeKey` and SSM write grants exist.
+   To rotate an existing KMS key, replace it in Terraform with a new alias
+   target; the old key stays scheduled for deletion for 30 days.
+2. Set `SIGNING_KMS_KEY_ID` and `SIGNING_KEY_PARAMETER_PREFIX` on the
+   environment.
+3. Release a new version in that environment (a new rc tag for staging, a plain
+   tag or a production dispatch for production). The run publishes the new
+   certificate and key id to SSM before it signs, and the registry checks the
+   upload against it.
+4. Check the run summary for the new key id, then `terraform init` a root that
+   pins the new version against that registry.
+
+Retiring the GPG key, once both environments have released with KMS: delete
+the `webbpulse-terraform-<env>-provider-signing-key` secrets, the
+`...-provider-signing-keygen` roles and the release role's `ReadSigningKey`
+statement in WebbPulse-Terraform, then delete `.github/workflows/signing-key.yml`,
+the `<env>-signing-key` environments and `SIGNING_KEY_SECRET_ID` here.
 
 After a version publishes, refresh the lock file of every root that pins it, with
 hashes taken from the registry:
