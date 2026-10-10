@@ -449,7 +449,7 @@ only when they bump the version they pin, for example WebbPulse-Platform's
 holds hashes, not the key id, so nothing else changes for them. Terraform prints
 the new key id on the next `init` of a bumped version.
 
-To rotate an environment, or to switch it from the old GPG key to KMS:
+To rotate an environment's signing key:
 
 1. Apply WebbPulse-Terraform so the KMS key and the release role's
    `kms:Sign`, `kms:GetPublicKey`, `kms:DescribeKey` and SSM write grants exist.
@@ -463,12 +463,6 @@ To rotate an environment, or to switch it from the old GPG key to KMS:
    upload against it.
 4. Check the run summary for the new key id, then `terraform init` a root that
    pins the new version against that registry.
-
-Retiring the GPG key, once both environments have released with KMS: delete
-the `webbpulse-terraform-<env>-provider-signing-key` secrets, the
-`...-provider-signing-keygen` roles and the release role's `ReadSigningKey`
-statement in WebbPulse-Terraform, then delete `.github/workflows/signing-key.yml`,
-the `<env>-signing-key` environments and `SIGNING_KEY_SECRET_ID` here.
 
 After a version publishes, refresh the lock file of every root that pins it, with
 hashes taken from the registry:
