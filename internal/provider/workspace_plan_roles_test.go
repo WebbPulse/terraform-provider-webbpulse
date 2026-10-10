@@ -143,21 +143,21 @@ func TestPlanAssumeRoleARNsValidators(t *testing.T) {
 	for i := range eleven {
 		eleven[i] = fmt.Sprintf("arn:aws:iam::111122223333:role/reader-%d", i)
 	}
-	long := "arn:aws:iam::111122223333:role/" + strings.Repeat("r", 160-len("arn:aws:iam::111122223333:role/")+1)
+	long := "arn:aws:iam::111122223333:role/" + strings.Repeat("r", 140-len("arn:aws:iam::111122223333:role/")+1)
 	for _, tc := range []struct {
 		name  string
 		arns  []string
 		valid bool
 	}{
 		{name: "exact roles", arns: []string{readerRoleA, readerRoleB}, valid: true},
-		{name: "longest accepted", arns: []string{long[:160]}, valid: true},
+		{name: "longest accepted", arns: []string{long[:140]}, valid: true},
 		{name: "ten roles", arns: eleven[:10], valid: true},
 		{name: "wildcard", arns: []string{"arn:aws:iam::111122223333:role/reader-*"}},
 		{name: "account wildcard", arns: []string{"arn:aws:iam::*:role/reader"}},
 		{name: "not a role", arns: []string{"arn:aws:iam::111122223333:user/reader"}},
 		{name: "other partition", arns: []string{"arn:aws-us-gov:iam::111122223333:role/reader"}},
 		{name: "surrounding whitespace", arns: []string{" " + readerRoleA}},
-		{name: "too long", arns: []string{long}},
+		{name: "141 characters", arns: []string{long}},
 		{name: "eleven roles", arns: eleven},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
