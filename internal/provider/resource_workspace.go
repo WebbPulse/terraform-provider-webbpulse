@@ -177,8 +177,8 @@ func (r *workspaceResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				ElementType: types.StringType,
 				Default:     setdefault.StaticValue(emptyStringSet()),
 				MarkdownDescription: "Exact IAM role ARNs a plan session may assume beside its read only access, " +
-					"such as a Route 53 reader role in another account. At most 10, each up to 120 characters, " +
-					"with no wildcards. An apply is not limited by this list. Removing it, or setting it to " +
+					"such as a Route 53 reader role in another account. At most 25, each up to 120 characters, " +
+					"with no wildcards, and together with `plan_secret_arns` they must fit the plan's session policy. An apply is not limited by this list. Removing it, or setting it to " +
 					"`[]`, sends an explicit null and clears the list.",
 				Validators: planAssumeRoleARNsValidators(),
 			},
