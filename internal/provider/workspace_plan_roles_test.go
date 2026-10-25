@@ -139,9 +139,9 @@ func TestPlanAssumeRoleARNsCreate(t *testing.T) {
 
 // TestPlanAssumeRoleARNsValidators checks the schema refuses what the API refuses.
 func TestPlanAssumeRoleARNsValidators(t *testing.T) {
-	eleven := make([]string, 11)
-	for i := range eleven {
-		eleven[i] = fmt.Sprintf("arn:aws:iam::111122223333:role/reader-%d", i)
+	tooMany := make([]string, 26)
+	for i := range tooMany {
+		tooMany[i] = fmt.Sprintf("arn:aws:iam::111122223333:role/reader-%d", i)
 	}
 	long := "arn:aws:iam::111122223333:role/" + strings.Repeat("r", 120-len("arn:aws:iam::111122223333:role/")+1)
 	for _, tc := range []struct {
@@ -151,14 +151,14 @@ func TestPlanAssumeRoleARNsValidators(t *testing.T) {
 	}{
 		{name: "exact roles", arns: []string{readerRoleA, readerRoleB}, valid: true},
 		{name: "longest accepted", arns: []string{long[:120]}, valid: true},
-		{name: "ten roles", arns: eleven[:10], valid: true},
+		{name: "twenty five roles", arns: tooMany[:25], valid: true},
 		{name: "wildcard", arns: []string{"arn:aws:iam::111122223333:role/reader-*"}},
 		{name: "account wildcard", arns: []string{"arn:aws:iam::*:role/reader"}},
 		{name: "not a role", arns: []string{"arn:aws:iam::111122223333:user/reader"}},
 		{name: "other partition", arns: []string{"arn:aws-us-gov:iam::111122223333:role/reader"}},
 		{name: "surrounding whitespace", arns: []string{" " + readerRoleA}},
 		{name: "121 characters", arns: []string{long}},
-		{name: "eleven roles", arns: eleven},
+		{name: "twenty six roles", arns: tooMany},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
